@@ -3,12 +3,10 @@
 let users = require('../lib/models/users');
 let lists = require('../lib/models/lists');
 let fields = require('../lib/models/fields');
-let templates = require('../lib/models/templates');
 let blacklist = require('../lib/models/blacklist');
 let subscriptions = require('../lib/models/subscriptions');
 let confirmations = require('../lib/models/confirmations');
-let settings = require('../lib/models/settings');
-let mailer = require('../lib/mailer');
+let createTemplateSender = require('../lib/template-sender');
 let tools = require('../lib/tools');
 let express = require('express');
 let log = require('npmlog');
@@ -538,90 +536,25 @@ router.post('/templates/:templateId/send', (req, res) => {
         ] = req.body[key] || '';
     });
 
-    if (!input.DATA) {
-        return res.status(500).json({
-            error: 'Missing DATA',
-            data: []
-        });
-    }
-
-    if (!input.EMAILS || !Array.isArray(input.EMAILS) || input.EMAILS.length === 0) {
-        return res.status(500).json({
-            error: 'Missing EMAILS',
-            data: []
-        });
-    }
-
-    if(input.EMAILS.length > 100) {
-        return res.status(500).json({
-            error: 'Cannot send more than 100 emails at once',
-            data: []
-        });
-    }
-
-    let errSent = false;
-    let configItems, template, transport;
-    
-    mailer.getMailer((err, trans) => {
+    createTemplateSender(req.params.templateId, (err, templateSender) => {
         if (err) {
             return sendError(err);
         }
-        transport = trans;
-        sendMail();
-    });
-    
-    const { templateId } = req.params;
-    templates.get(templateId, (err, loadedTemplate) => {
-        if (err || !loadedTemplate) {
-            return sendError(err || `Template '${templateId}' not found`);
-        }
-        template = loadedTemplate;
-        sendMail();
-    });
 
-    settings.list(
-        ['adminEmail'],
-        (err, confItems) => {
+        templateSender(input, (err, info) => {
             if (err) {
                 return sendError(err);
             }
-            configItems = confItems;
-            sendMail();
-        }
-    );
-
-    function sendMail() {
-        if (!configItems || !template || !transport || errSent) { 
-            return; 
-        }
-        transport.sendMail(
-            {
-                from: { address: configItems.adminEmail },
-                to: input.EMAILS,
-                subject: input.SUBJECT,
-                html: template.html,
-                text: template.text
-                // TODO: data
-            },
-            handleMailSent
-        );
-    }
+    
+            res.status(200).json({ data: info });
+        });
+    });
 
     function sendError(err) {
-        if (errSent) { return; }
-        errSent = true;
         res.status(500).json({
             error: err.message || err,
             data: []
         });
-    }
-
-    function handleMailSent(err, info) {
-        if (err) {
-            return sendError(err);
-        }
-
-        res.status(200).json({ data: info });
     }
 });
 
