@@ -536,18 +536,14 @@ router.post('/templates/:templateId/send', (req, res) => {
         ] = req.body[key] || '';
     });
 
-    createTemplateSender(req.params.templateId, (err, templateSender) => {
+    const sendTemplate = createTemplateSender({ 
+        templateId: req.params.templateId 
+    });
+    sendTemplate(input, (err, info) => {
         if (err) {
             return sendError(err);
         }
-
-        templateSender(input, (err, info) => {
-            if (err) {
-                return sendError(err);
-            }
-    
-            res.status(200).json({ data: info });
-        });
+        res.status(200).json({ data: info });
     });
 
     function sendError(err) {
