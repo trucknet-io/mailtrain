@@ -61,6 +61,7 @@ const index = require('./routes/index');
 const interoperableErrors = require('../shared/interoperable-errors');
 
 const { getTrustedUrl } = require('./lib/urls');
+const hbsHelpers = require("./lib/hbs-helpers");
 const { AppType } = require('../shared/app');
 
 
@@ -72,6 +73,8 @@ function setReady() {
 
 hbs.registerPartials(__dirname + '/views/partials');
 hbs.registerPartials(__dirname + '/views/subscription/partials/');
+hbsHelpers.registerSwitchCase();
+hbsHelpers.registerIfConditions();
 
 /**
  * We need this helper to make sure that we consume flash messages only
