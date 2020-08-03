@@ -1,38 +1,29 @@
 'use strict';
 
 import React, {Component} from 'react';
-import PropTypes
-    from 'prop-types';
+import PropTypes from 'prop-types';
 import {HTTPMethod} from '../../lib/axios';
 import {withTranslation} from '../../lib/i18n';
-import {
-    LinkButton,
-    requiresAuthenticatedUser,
-    Title,
-    withPageHelpers
-} from '../../lib/page';
+import {LinkButton, requiresAuthenticatedUser, Title, withPageHelpers} from '../../lib/page';
 import {
     AlignedRow,
     Button,
     ButtonRow,
     CheckBox,
     Dropdown,
+    filterData,
     Form,
     FormSendMethod,
     InputField,
-    withForm
+    withForm,
+    withFormErrorHandlers
 } from '../../lib/form';
 import {withErrorHandling} from '../../lib/error-handling';
 import {RestActionModalDialog} from "../../lib/modals";
-import interoperableErrors
-    from '../../../../shared/interoperable-errors';
-import {SubscriptionStatus} from '../../../../shared/lists';
-import {
-    getFieldTypes,
-    getSubscriptionStatusLabels
-} from './helpers';
-import moment
-    from 'moment-timezone';
+import interoperableErrors from '../../../../shared/interoperable-errors';
+import {getFieldColumn, SubscriptionStatus} from '../../../../shared/lists';
+import {getFieldTypes, getSubscriptionStatusLabels} from './helpers';
+import moment from 'moment-timezone';
 import {withComponentMixins} from "../../lib/decorator-helpers";
 
 @withComponentMixins([
@@ -60,6 +51,11 @@ export default class CUD extends Component {
                 extra: ['id']
             },
         });
+
+        this.timezoneOptions = [
+            { key: '', label: t('notSelected') },
+            ...moment.tz.names().map(tz => ({ key: tz.toLowerCase(), label: tz }))
+        ];
     }
 
     static propTypes = {
@@ -78,9 +74,23 @@ export default class CUD extends Component {
         }
     }
 
+    submitFormValuesMutator(data) {
+        data.status = parseInt(data.status);
+        data.tz = data.tz || null;
+
+        const allowedCols = ['email', 'tz', 'is_test', 'status'];
+
+        for (const fld of this.props.fieldsGrouped) {
+            this.fieldTypes[fld.type].assignEntity(fld, data);
+            allowedCols.push(getFieldColumn(fld));
+        }
+
+        return filterData(data, allowedCols);
+    }
+
     componentDidMount() {
         if (this.props.entity) {
-            this.getFormValuesFromEntity(this.props.entity, ::this.getFormValuesMutator);
+            this.getFormValuesFromEntity(this.props.entity);
 
         } else {
             const data = {
@@ -117,6 +127,7 @@ export default class CUD extends Component {
         }
     }
 
+    @withFormErrorHandlers
     async submitHandler(submitAndLeave) {
         const t = this.props.t;
 
@@ -133,29 +144,22 @@ export default class CUD extends Component {
             this.disableForm();
             this.setFormStatusMessage('info', t('saving'));
 
-            const submitResult = await this.validateAndSendFormValuesToURL(sendMethod, url, data => {
-                data.status = parseInt(data.status);
-                data.tz = data.tz || null;
-
-                for (const fld of this.props.fieldsGrouped) {
-                    this.fieldTypes[fld.type].assignEntity(fld, data);
-                }
-            });
+            const submitResult = await this.validateAndSendFormValuesToURL(sendMethod, url);
 
             if (submitResult) {
                 if (this.props.entity) {
                     if (submitAndLeave) {
-                        this.navigateToWithFlashMessage(`/lists/${this.props.list.id}/subscriptions`, 'success', t('Subscription updated'));
+                        this.navigateToWithFlashMessage(`/lists/${this.props.list.id}/subscriptions`, 'success', t('subscriptionUpdated'));
                     } else {
-                        await this.getFormValuesFromURL(`rest/subscriptions/${this.props.list.id}/${this.props.entity.id}`, ::this.getFormValuesMutator);
+                        await this.getFormValuesFromURL(`rest/subscriptions/${this.props.list.id}/${this.props.entity.id}`);
                         this.enableForm();
-                        this.setFormStatusMessage('success', t('Subscription updated'));
+                        this.setFormStatusMessage('success', t('subscriptionUpdated'));
                     }
                 } else {
                     if (submitAndLeave) {
-                        this.navigateToWithFlashMessage(`/lists/${this.props.list.id}/subscriptions`, 'success', t('Subscription created'));
+                        this.navigateToWithFlashMessage(`/lists/${this.props.list.id}/subscriptions`, 'success', t('subscriptionCreated'));
                     } else {
-                        this.navigateToWithFlashMessage(`/lists/${this.props.list.id}/subscriptions/${submitResult}/edit`, 'success', t('Subscription created'));
+                        this.navigateToWithFlashMessage(`/lists/${this.props.list.id}/subscriptions/${submitResult}/edit`, 'success', t('subscriptionCreated'));
                     }
                 }
             } else {
@@ -163,6 +167,7 @@ export default class CUD extends Component {
                 this.setFormStatusMessage('warning', t('thereAreErrorsInTheFormPleaseFixThemAnd'));
             }
         } catch (error) {
+            console.log(error)
             if (error instanceof interoperableErrors.DuplicitEmailError) {
                 this.setFormStatusMessage('danger',
                     <span>
@@ -185,11 +190,6 @@ export default class CUD extends Component {
 
         const statusOptions = Object.keys(this.subscriptionStatusLabels)
             .map(key => ({key, label: this.subscriptionStatusLabels[key]}));
-
-        const tzOptions = [
-            { key: '', label: t('notSelected') },
-            ...moment.tz.names().map(tz => ({ key: tz.toLowerCase(), label: tz }))
-        ];
 
         const customFields = [];
         for (const fld of this.props.fieldsGrouped) {
@@ -220,10 +220,9 @@ export default class CUD extends Component {
                     <InputField id="email" label={t('email')}/>
 
                     {customFields}
-
                     <hr />
 
-                    <Dropdown id="tz" label={t('timezone')} options={tzOptions}/>
+                    <Dropdown id="tz" label={t('timezone')} options={this.timezoneOptions}/>
 
                     <Dropdown id="status" label={t('subscriptionStatus')} options={statusOptions}/>
 
@@ -238,8 +237,8 @@ export default class CUD extends Component {
                         </AlignedRow>
                     }
                     <ButtonRow>
-                        <Button type="submit" className="btn-primary" icon="check" label={t('Save')}/>
-                        <Button type="submit" className="btn-primary" icon="check" label={t('Save and leave')} onClickAsync={async () => this.submitHandler(true)}/>
+                        <Button type="submit" className="btn-primary" icon="check" label={t('save')}/>
+                        <Button type="submit" className="btn-primary" icon="check" label={t('saveAndLeave')} onClickAsync={async () => await this.submitHandler(true)}/>
                         {isEdit && <LinkButton className="btn-danger" icon="trash-alt" label={t('delete')} to={`/lists/${this.props.list.id}/subscriptions/${this.props.entity.id}/delete`}/>}
                     </ButtonRow>
                 </Form>

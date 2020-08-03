@@ -1,15 +1,9 @@
 'use strict';
 
 import React, {Component} from 'react';
-import PropTypes
-    from 'prop-types';
+import PropTypes from 'prop-types';
 import {withTranslation} from '../lib/i18n';
-import {
-    LinkButton,
-    requiresAuthenticatedUser,
-    Title,
-    withPageHelpers
-} from '../lib/page'
+import {LinkButton, requiresAuthenticatedUser, Title, withPageHelpers} from '../lib/page'
 import {
     AlignedRow,
     Button,
@@ -17,48 +11,32 @@ import {
     CheckBox,
     Dropdown,
     Fieldset,
+    filterData,
     Form,
     FormSendMethod,
     InputField,
     StaticField,
     TableSelect,
     TextArea,
-    withForm
+    withForm,
+    withFormErrorHandlers
 } from '../lib/form';
-import {
-    withAsyncErrorHandler,
-    withErrorHandling
-} from '../lib/error-handling';
-import {
-    NamespaceSelect,
-    validateNamespace
-} from '../lib/namespace';
+import {withAsyncErrorHandler, withErrorHandling} from '../lib/error-handling';
+import {getDefaultNamespace, NamespaceSelect, validateNamespace} from '../lib/namespace';
 import {DeleteModalDialog} from "../lib/modals";
-import mailtrainConfig
-    from 'mailtrainConfig';
-import {
-    getTemplateTypes,
-    getTypeForm,
-    ResourceType
-} from '../templates/helpers';
-import axios
-    from '../lib/axios';
-import styles
-    from "../lib/styles.scss";
-import campaignsStyles
-    from "./styles.scss";
+import mailtrainConfig from 'mailtrainConfig';
+import {getTagLanguages, getTemplateTypes, getTypeForm, ResourceType} from '../templates/helpers';
+import axios from '../lib/axios';
+import styles from "../lib/styles.scss";
+import campaignsStyles from "./styles.scss";
 import {getUrl} from "../lib/urls";
-import {
-    campaignOverridables,
-    CampaignSource,
-    CampaignStatus,
-    CampaignType
-} from "../../../shared/campaigns";
-import moment
-    from 'moment';
+import {campaignOverridables, CampaignSource, CampaignStatus, CampaignType} from "../../../shared/campaigns";
+import moment from 'moment';
 import {getMailerTypes} from "../send-configurations/helpers";
-import {getCampaignLabels} from "./helpers";
+import {getCampaignLabels, ListsSelectorHelper} from "./helpers";
 import {withComponentMixins} from "../lib/decorator-helpers";
+import interoperableErrors from "../../../shared/interoperable-errors";
+import {Trans} from "react-i18next";
 
 @withComponentMixins([
     withTranslation,
@@ -73,7 +51,11 @@ export default class CUD extends Component {
 
         const t = props.t;
 
+        this.listsSelectorHelper = new ListsSelectorHelper(this, t, 'lists');
+
         this.templateTypes = getTemplateTypes(props.t, 'data_sourceCustom_', ResourceType.CAMPAIGN);
+        this.tagLanguages = getTagLanguages(props.t);
+
         this.mailerTypes = getMailerTypes(props.t);
 
         const { campaignTypeLabels } = getCampaignLabels(t);
@@ -92,15 +74,19 @@ export default class CUD extends Component {
         };
 
         this.sourceLabels = {
+            [CampaignSource.CUSTOM]: t('customContent'),
+            [CampaignSource.CUSTOM_FROM_CAMPAIGN]: t('customContentClonedFromAnotherCampaign'),
             [CampaignSource.TEMPLATE]: t('template'),
             [CampaignSource.CUSTOM_FROM_TEMPLATE]: t('customContentClonedFromTemplate'),
-            [CampaignSource.CUSTOM_FROM_CAMPAIGN]: t('customContentClonedFromAnotherCampaign'),
-            [CampaignSource.CUSTOM]: t('customContent'),
             [CampaignSource.URL]: t('url')
         };
 
+        const sourceLabelsOrder = [
+            CampaignSource.CUSTOM, CampaignSource.CUSTOM_FROM_CAMPAIGN , CampaignSource.TEMPLATE, CampaignSource.CUSTOM_FROM_TEMPLATE, CampaignSource.URL
+        ];
+
         this.sourceOptions = [];
-        for (const key in this.sourceLabels) {
+        for (const key of sourceLabelsOrder) {
             this.sourceOptions.push({key, label: this.sourceLabels[key]});
         }
 
@@ -109,38 +95,51 @@ export default class CUD extends Component {
             this.customTemplateTypeOptions.push({key, label: this.templateTypes[key].typeName});
         }
 
+        this.customTemplateTagLanguageOptions = [];
+        for (const key of mailtrainConfig.tagLanguages) {
+            this.customTemplateTagLanguageOptions.push({key, label: this.tagLanguages[key].name});
+        }
+
         this.state = {
             sendConfiguration: null
         };
 
-        this.nextListEntryId = 0;
-
         this.initForm({
+            leaveConfirmation: !props.entity || props.entity.permissions.includes('edit'),
             onChange: {
                 send_configuration: ::this.onSendConfigurationChanged
             },
-            onChangeBeforeValidation: {
-                data_sourceCustom_type: ::this.onCustomTemplateTypeChanged
-            }
+            onChangeBeforeValidation: ::this.onFormChangeBeforeValidation
         });
     }
 
     static propTypes = {
         action: PropTypes.string.isRequired,
         entity: PropTypes.object,
+        createFromChannel: PropTypes.object,
+        crateFromCampaign: PropTypes.object,
+        permissions: PropTypes.object,
         type: PropTypes.number
     }
 
-    getNextListEntryId() {
-        const id = this.nextListEntryId;
-        this.nextListEntryId += 1;
-        return id;
-    }
+    onFormChangeBeforeValidation(mutStateData, key, oldValue, newValue) {
+        let match;
 
-    onCustomTemplateTypeChanged(mutStateData, key, oldType, type) {
-        if (type) {
-            this.templateTypes[type].afterTypeChange(mutStateData);
+        if (key === 'data_sourceCustom_type') {
+            if (newValue) {
+                this.templateTypes[newValue].afterTypeChange(mutStateData);
+            }
         }
+
+        if (key === 'data_sourceCustom_tag_language') {
+            if (newValue) {
+                const currentType = this.getFormValue('data_sourceCustom_type');
+                const isEdit = !!this.props.entity;
+                this.templateTypes[currentType].afterTagLanguageChange(mutStateData, isEdit);
+            }
+        }
+
+        this.listsSelectorHelper.onFormChangeBeforeValidation(mutStateData, key, oldValue, newValue);
     }
 
     onSendConfigurationChanged(newState, key, oldValue, sendConfigurationId) {
@@ -154,12 +153,22 @@ export default class CUD extends Component {
         if (sendConfigurationId) {
             this.fetchSendConfigurationId = sendConfigurationId;
 
-            const result = await axios.get(getUrl(`rest/send-configurations-public/${sendConfigurationId}`));
+            try {
+                const result = await axios.get(getUrl(`rest/send-configurations-public/${sendConfigurationId}`));
 
-            if (sendConfigurationId === this.fetchSendConfigurationId) {
-                this.setState({
-                    sendConfiguration: result.data
-                });
+                if (sendConfigurationId === this.fetchSendConfigurationId) {
+                    this.setState({
+                        sendConfiguration: result.data
+                    });
+                }
+            } catch (err) {
+                if (err instanceof interoperableErrors.PermissionDeniedError) {
+                    this.setState({
+                        sendConfiguration: null
+                    });
+                } else {
+                    throw err;
+                }
             }
         }
     }
@@ -179,88 +188,239 @@ export default class CUD extends Component {
         }
 
         for (const overridable of campaignOverridables) {
-            data[overridable + '_overriden'] = data[overridable + '_override'] !== null;
+            if (data[overridable + '_override'] === null) {
+                data[overridable + '_override'] = '';
+                data[overridable + '_overriden'] = false;
+            } else {
+                data[overridable + '_overriden'] = true;
+            }
         }
 
-        const lsts = [];
-        for (const lst of data.lists) {
-            const lstUid = this.getNextListEntryId();
-
-            const prefix = 'lists_' + lstUid + '_';
-
-            data[prefix + 'list'] = lst.list;
-            data[prefix + 'segment'] = lst.segment;
-            data[prefix + 'useSegmentation'] = !!lst.segment;
-
-            lsts.push(lstUid);
-        }
-        data.lists = lsts;
+        this.listsSelectorHelper.getFormValuesMutator(data);
 
         // noinspection JSIgnoredPromiseFromCall
         this.fetchSendConfiguration(data.send_configuration);
     }
 
+    submitFormValuesMutator(data) {
+        const isEdit = !!this.props.entity;
+
+        data.source = Number.parseInt(data.source);
+
+        data.data = {};
+        if (data.source === CampaignSource.TEMPLATE || data.source === CampaignSource.CUSTOM_FROM_TEMPLATE) {
+            data.data.sourceTemplate = data.data_sourceTemplate;
+        }
+
+        if (data.source === CampaignSource.CUSTOM_FROM_CAMPAIGN) {
+            data.data.sourceCampaign = data.data_sourceCampaign;
+        }
+
+        if (!isEdit && data.source === CampaignSource.CUSTOM) {
+            this.templateTypes[data.data_sourceCustom_type].beforeSave(data);
+
+            data.data.sourceCustom = {
+                type: data.data_sourceCustom_type,
+                tag_language: data.data_sourceCustom_tag_language,
+                data: data.data_sourceCustom_data,
+                html: data.data_sourceCustom_html,
+                text: data.data_sourceCustom_text
+            }
+        }
+
+        if (data.source === CampaignSource.URL) {
+            data.data.sourceUrl = data.data_sourceUrl;
+        }
+
+        if (data.type === CampaignType.RSS) {
+            data.data.feedUrl = data.data_feedUrl;
+        }
+
+        for (const overridable of campaignOverridables) {
+            if (!data[overridable + '_overriden']) {
+                data[overridable + '_override'] = null;
+            }
+            delete data[overridable + '_overriden'];
+        }
+
+        this.listsSelectorHelper.submitFormValuesMutator(data);
+
+        return filterData(data, [
+            'name', 'description', 'channel', 'namespace', 'send_configuration',
+            'subject', 'from_name_override', 'from_email_override', 'reply_to_override',
+            'data', 'click_tracking_disabled', 'open_tracking_disabled', 'unsubscribe_url',
+            'type', 'source', 'parent', 'lists'
+        ]);
+    }
+
     componentDidMount() {
         if (this.props.entity) {
-            this.getFormValuesFromEntity(this.props.entity, ::this.getFormValuesMutator);
+            this.getFormValuesFromEntity(this.props.entity);
 
             if (this.props.entity.status === CampaignStatus.SENDING) {
                 this.disableForm();
             }
 
         } else {
+
             const data = {};
-            for (const overridable of campaignOverridables) {
-                data[overridable + '_override'] = '';
-                data[overridable + '_overriden'] = false;
+
+            // This is for CampaignSource.TEMPLATE and CampaignSource.CUSTOM_FROM_TEMPLATE
+            data.data_sourceTemplate = null;
+
+            // This is for CampaignSource.CUSTOM_FROM_CAMPAIGN
+            data.data_sourceCampaign = null;
+
+            // This is for CampaignSource.CUSTOM
+            data.data_sourceCustom_type = mailtrainConfig.editors[0];
+            data.data_sourceCustom_tag_language = mailtrainConfig.tagLanguages[0];
+            data.data_sourceCustom_data = {};
+            data.data_sourceCustom_html = '';
+            data.data_sourceCustom_text = '';
+
+            Object.assign(data, this.templateTypes[mailtrainConfig.editors[0]].initData());
+
+            // This is for CampaignSource.URL
+            data.data_sourceUrl = '';
+
+            // This is for CampaignType.RSS
+            data.data_feedUrl = '';
+
+
+            if (this.props.createFromChannel) {
+                const channel = this.props.createFromChannel;
+
+                data.channel = channel.id;
+
+                for (const overridable of campaignOverridables) {
+                    if (channel[overridable + '_override'] === null) {
+                        data[overridable + '_override'] = '';
+                        data[overridable + '_overriden'] = false;
+                    } else {
+                        data[overridable + '_override'] = channel[overridable + '_override'];
+                        data[overridable + '_overriden'] = true;
+                    }
+                }
+
+                this.listsSelectorHelper.populateFrom(data, channel.lists);
+
+                data.type = CampaignType.REGULAR;
+
+                data.name = channel.cpg_name;
+                data.description = channel.cpg_description;
+
+                data.send_configuration = channel.send_configuration;
+                if (channel.send_configuration) {
+                    // noinspection JSIgnoredPromiseFromCall
+                    this.fetchSendConfiguration(channel.send_configuration);
+                }
+
+                data.namespace = channel.namespace;
+
+                data.subject = channel.subject;
+
+                data.click_tracking_disabled = channel.click_tracking_disabled;
+                data.open_tracking_disabled = channel.open_tracking_disabled;
+
+                data.unsubscribe_url = channel.unsubscribe_url;
+
+                data.source = channel.source;
+
+                if (channel.source === CampaignSource.CUSTOM_FROM_TEMPLATE) {
+                    data.data_sourceTemplate = channel.sourceTemplate;
+
+                } else if (channel.source === CampaignSource.CUSTOM_FROM_CAMPAIGN) {
+                    data.data_sourceCampaign = channel.data.sourceCampaign;
+
+                } else if (channel.source === CampaignSource.CUSTOM) {
+                    data.data_sourceCustom_type = channel.data.sourceCustom.type;
+                    data.data_sourceCustom_tag_language = channel.data.sourceCustom.tag_language;
+                    data.data_sourceCustom_data = channel.data.sourceCustom.data;
+
+                    this.templateTypes[channel.data.sourceCustom.type].afterLoad(data);
+
+                } else if (channel.source === CampaignSource.URL) {
+                    data.data_sourceUrl = channel.data.sourceUrl
+                }
+
+
+            } else if (this.props.createFromCampaign) {
+                const sourceCampaign = this.props.createFromCampaign;
+
+                data.channel = sourceCampaign.channel;
+
+                for (const overridable of campaignOverridables) {
+                    if (sourceCampaign[overridable + '_override'] === null) {
+                        data[overridable + '_override'] = '';
+                        data[overridable + '_overriden'] = false;
+                    } else {
+                        data[overridable + '_override'] = sourceCampaign[overridable + '_override'];
+                        data[overridable + '_overriden'] = true;
+                    }
+                }
+
+                this.listsSelectorHelper.populateFrom(data, sourceCampaign.lists);
+
+                data.type = sourceCampaign.type;
+
+                data.name = sourceCampaign.name;
+                data.description = sourceCampaign.description;
+
+                data.send_configuration = sourceCampaign.send_configuration;
+                // noinspection JSIgnoredPromiseFromCall
+                this.fetchSendConfiguration(sourceCampaign.send_configuration);
+
+                data.namespace = sourceCampaign.namespace;
+
+                data.subject = sourceCampaign.subject;
+
+                data.click_tracking_disabled = sourceCampaign.click_tracking_disabled;
+                data.open_tracking_disabled = sourceCampaign.open_tracking_disabled;
+
+                data.unsubscribe_url = sourceCampaign.unsubscribe_url;
+
+                if (sourceCampaign.source === CampaignSource.CUSTOM_FROM_TEMPLATE || sourceCampaign.source === CampaignSource.CUSTOM_FROM_CAMPAIGN || sourceCampaign.source === CampaignSource.CUSTOM) {
+                    data.source = CampaignSource.CUSTOM_FROM_CAMPAIGN;
+                    data.data_sourceCampaign = sourceCampaign.id;
+
+                } else if (sourceCampaign.source === CampaignSource.TEMPLATE) {
+                    data.source = CampaignSource.TEMPLATE;
+                    data.data_sourceTemplate = sourceCampaign.data.sourceTemplate;
+
+                } else if (sourceCampaign.source === CampaignSource.URL) {
+                    data.source = CampaignSource.URL;
+                    data.data_sourceUrl = sourceCampaign.data.sourceUrl;
+                }
+
+            } else {
+                for (const overridable of campaignOverridables) {
+                    data[overridable + '_override'] = '';
+                    data[overridable + '_overriden'] = false;
+                }
+
+                data.channel = null;
+
+                data.type = this.props.type;
+
+                data.name = '';
+                data.description = '';
+
+                this.listsSelectorHelper.populateFrom(data, [{list: null, segment: null}]);
+
+                data.send_configuration = null;
+                data.namespace = getDefaultNamespace(this.props.permissions);
+
+                data.subject = '';
+
+                data.click_tracking_disabled = false;
+                data.open_tracking_disabled = false;
+
+                data.unsubscribe_url = '';
+
+                data.source = CampaignSource.CUSTOM;
             }
 
-            const lstUid = this.getNextListEntryId();
-            const lstPrefix = 'lists_' + lstUid + '_';
-
-            this.populateFormValues({
-                ...data,
-
-                type: this.props.type,
-
-                name: '',
-                description: '',
-
-                [lstPrefix + 'list']: null,
-                [lstPrefix + 'segment']: null,
-                [lstPrefix + 'useSegmentation']: false,
-                lists: [lstUid],
-
-                send_configuration: null,
-                namespace: mailtrainConfig.user.namespace,
-
-                click_tracking_disabled: false,
-                open_tracking_disabled: false,
-
-                unsubscribe_url: '',
-
-                source: CampaignSource.TEMPLATE,
-
-                // This is for CampaignSource.TEMPLATE and CampaignSource.CUSTOM_FROM_TEMPLATE
-                data_sourceTemplate: null,
-
-                // This is for CampaignSource.CUSTOM_FROM_CAMPAIGN
-                data_sourceCampaign: null,
-
-                // This is for CampaignSource.CUSTOM
-                data_sourceCustom_type: mailtrainConfig.editors[0],
-                data_sourceCustom_data: {},
-                data_sourceCustom_html: '',
-                data_sourceCustom_text: '',
-
-                ...this.templateTypes[mailtrainConfig.editors[0]].initData(),
-
-                // This is for CampaignSource.URL
-                data_sourceUrl: '',
-
-                // This is for CampaignType.RSS
-                data_feedUrl: ''
-            });
+            this.populateFormValues(data);
         }
     }
 
@@ -274,6 +434,10 @@ export default class CUD extends Component {
 
         if (!state.getIn(['name', 'value'])) {
             state.setIn(['name', 'error'], t('nameMustNotBeEmpty'));
+        }
+
+        if (!state.getIn(['subject', 'value'])) {
+            state.setIn(['subject', 'error'], t('"Subject" line must not be empty"'));
         }
 
         if (!state.getIn(['send_configuration', 'value'])) {
@@ -306,6 +470,10 @@ export default class CUD extends Component {
                 state.setIn(['data_sourceCustom_type', 'error'], t('typeMustBeSelected'));
             }
 
+            if (!state.getIn(['data_sourceCustom_tag_language', 'value'])) {
+                state.setIn(['data_sourceCustom_tag_language', 'error'], t('tagLanguageMustBeSelected'));
+            }
+
             if (customTemplateTypeKey) {
                 this.templateTypes[customTemplateTypeKey].validate(state);
             }
@@ -322,19 +490,7 @@ export default class CUD extends Component {
             }
         }
 
-        for (const lstUid of state.getIn(['lists', 'value'])) {
-            const prefix = 'lists_' + lstUid + '_';
-
-            if (!state.getIn([prefix + 'list', 'value'])) {
-                state.setIn([prefix + 'list', 'error'], t('listMustBeSelected'));
-            }
-
-            if (campaignTypeKey === CampaignType.REGULAR || campaignTypeKey === CampaignType.RSS) {
-                if (state.getIn([prefix + 'useSegmentation', 'value']) && !state.getIn([prefix + 'segment', 'value'])) {
-                    state.setIn([prefix + 'segment', 'error'], t('segmentMustBeSelected'));
-                }
-            }
-        }
+        this.listsSelectorHelper.localValidateFormValues(state)
 
         validateNamespace(t, state);
     }
@@ -345,8 +501,8 @@ export default class CUD extends Component {
         STATUS: 2
     }
 
+    @withFormErrorHandlers
     async submitHandler(afterSubmitAction) {
-        const isEdit = !!this.props.entity;
         const t = this.props.t;
 
         let sendMethod, url;
@@ -361,87 +517,41 @@ export default class CUD extends Component {
         this.disableForm();
         this.setFormStatusMessage('info', t('saving'));
 
-        const submitResult = await this.validateAndSendFormValuesToURL(sendMethod, url, data => {
-            data.source = Number.parseInt(data.source);
-
-            data.data = {};
-            if (data.source === CampaignSource.TEMPLATE || data.source === CampaignSource.CUSTOM_FROM_TEMPLATE) {
-                data.data.sourceTemplate = data.data_sourceTemplate;
-            }
-
-            if (data.source === CampaignSource.CUSTOM_FROM_CAMPAIGN) {
-                data.data.sourceCampaign = data.data_sourceCampaign;
-            }
-
-            if (!isEdit && data.source === CampaignSource.CUSTOM) {
-                this.templateTypes[data.data_sourceCustom_type].beforeSave(data);
-
-                data.data.sourceCustom = {
-                    type: data.data_sourceCustom_type,
-                    data: data.data_sourceCustom_data,
-                    html: data.data_sourceCustom_html,
-                    text: data.data_sourceCustom_text
-                }
-            }
-
-            if (data.source === CampaignSource.URL) {
-                data.data.sourceUrl = data.data_sourceUrl;
-            }
-
-            if (data.type === CampaignType.RSS) {
-                data.data.feedUrl = data.data_feedUrl;
-            }
-
-            for (const overridable of campaignOverridables) {
-                if (!data[overridable + '_overriden']) {
-                    data[overridable + '_override'] = null;
-                }
-                delete data[overridable + '_overriden'];
-            }
-
-            const lsts = [];
-            for (const lstUid of data.lists) {
-                const prefix = 'lists_' + lstUid + '_';
-
-                const useSegmentation = data[prefix + 'useSegmentation'] && (data.type === CampaignType.REGULAR || data.type === CampaignType.RSS);
-
-                lsts.push({
-                    list: data[prefix + 'list'],
-                    segment: useSegmentation ? data[prefix + 'segment'] : null
-                });
-            }
-            data.lists = lsts;
-
-            for (const key in data) {
-                if (key.startsWith('data_') || key.startsWith('lists_')) {
-                    delete data[key];
-                }
-            }
-        });
+        const submitResult = await this.validateAndSendFormValuesToURL(sendMethod, url);
 
         if (submitResult) {
             if (this.props.entity) {
                 if (afterSubmitAction === CUD.AfterSubmitAction.STATUS) {
-                    this.navigateToWithFlashMessage(`/campaigns/${this.props.entity.id}/status`, 'success', t('Campaign updated'));
+                    this.navigateToWithFlashMessage(`/campaigns/${this.props.entity.id}/status`, 'success', t('campaignUpdated'));
                 } else if (afterSubmitAction === CUD.AfterSubmitAction.LEAVE) {
-                    this.navigateToWithFlashMessage('/campaigns', 'success', t('Campaign updated'));
+                    const channelId = this.getFormValue('channel');
+                    if (channelId) {
+                        this.navigateToWithFlashMessage(`/channels/${channelId}/campaigns`, 'success', t('campaignUpdated'));
+                    } else {
+                        this.navigateToWithFlashMessage('/campaigns', 'success', t('campaignUpdated'));
+                    }
                 } else {
-                    await this.getFormValuesFromURL(`rest/campaigns-settings/${this.props.entity.id}`, ::this.getFormValuesMutator);
+                    await this.getFormValuesFromURL(`rest/campaigns-settings/${this.props.entity.id}`);
                     this.enableForm();
-                    this.setFormStatusMessage('success', t('Campaign updated'));
+                    this.setFormStatusMessage('success', t('campaignUpdated'));
                 }
             } else {
                 const sourceTypeKey = Number.parseInt(this.getFormValue('source'));
 
                 if (sourceTypeKey === CampaignSource.CUSTOM || sourceTypeKey === CampaignSource.CUSTOM_FROM_TEMPLATE || sourceTypeKey === CampaignSource.CUSTOM_FROM_CAMPAIGN) {
-                    this.navigateToWithFlashMessage(`/campaigns/${submitResult}/content`, 'success', t('Campaign created'));
+                    this.navigateToWithFlashMessage(`/campaigns/${submitResult}/content`, 'success', t('campaignCreated'));
                 } else {
                     if (afterSubmitAction === CUD.AfterSubmitAction.STATUS) {
-                        this.navigateToWithFlashMessage(`/campaigns/${submitResult}/status`, 'success', t('Campaign created'));
+                        this.navigateToWithFlashMessage(`/campaigns/${submitResult}/status`, 'success', t('campaignCreated'));
                     } else if (afterSubmitAction === CUD.AfterSubmitAction.LEAVE) {
-                        this.navigateToWithFlashMessage(`/campaigns`, 'success', t('Campaign created'));
+                        const channelId = this.getFormValue('channel');
+                        if (channelId) {
+                            this.navigateToWithFlashMessage(`/channels/${channelId}/campaigns`, 'success', t('campaignCreated'));
+                        } else {
+                            this.navigateToWithFlashMessage(`/campaigns`, 'success', t('campaignCreated'));
+                        }
                     } else {
-                        this.navigateToWithFlashMessage(`/campaigns/${submitResult}/edit`, 'success', t('Campaign created'));
+                        this.navigateToWithFlashMessage(`/campaigns/${submitResult}/edit`, 'success', t('campaignCreated'));
                     }
                 }
             }
@@ -451,50 +561,11 @@ export default class CUD extends Component {
         }
     }
 
-    onAddListEntry(orderBeforeIdx) {
-        this.updateForm(mutState => {
-            const lsts = mutState.getIn(['lists', 'value']);
-            let paramId = 0;
-
-            const lstUid = this.getNextListEntryId();
-
-            const prefix = 'lists_' + lstUid + '_';
-
-            mutState.setIn([prefix + 'list', 'value'], null);
-            mutState.setIn([prefix + 'segment', 'value'], null);
-            mutState.setIn([prefix + 'useSegmentation', 'value'], false);
-
-            mutState.setIn(['lists', 'value'], [...lsts.slice(0, orderBeforeIdx), lstUid, ...lsts.slice(orderBeforeIdx)]);
-        });
-    }
-
-    onRemoveListEntry(lstUid) {
-        this.updateForm(mutState => {
-            const lsts = this.getFormValue('lists');
-
-            const prefix = 'lists_' + lstUid + '_';
-
-            mutState.delete(prefix + 'list');
-            mutState.delete(prefix + 'segment');
-            mutState.delete(prefix + 'useSegmentation');
-
-            mutState.setIn(['lists', 'value'], lsts.filter(val => val !== lstUid));
-        });
-    }
-
-    onListEntryMoveUp(orderIdx) {
-        const lsts = this.getFormValue('lists');
-        this.updateFormValue('lists', [...lsts.slice(0, orderIdx - 1), lsts[orderIdx], lsts[orderIdx - 1], ...lsts.slice(orderIdx + 1)]);
-    }
-
-    onListEntryMoveDown(orderIdx) {
-        const lsts = this.getFormValue('lists');
-        this.updateFormValue('lists', [...lsts.slice(0, orderIdx), lsts[orderIdx + 1], lsts[orderIdx], ...lsts.slice(orderIdx + 2)]);
-    }
 
     render() {
         const t = this.props.t;
         const isEdit = !!this.props.entity;
+        const canModify = !isEdit || this.props.entity.permissions.includes('edit');
         const canDelete = isEdit && this.props.entity.permissions.includes('delete');
 
         let extraSettings = null;
@@ -506,99 +577,18 @@ export default class CUD extends Component {
             extraSettings = <InputField id="data_feedUrl" label={t('rssFeedUrl')}/>
         }
 
-        const listsColumns = [
+        const channelsColumns = [
             { data: 1, title: t('name') },
             { data: 2, title: t('id'), render: data => <code>{data}</code> },
-            { data: 3, title: t('subscribers') },
-            { data: 4, title: t('description') },
-            { data: 5, title: t('namespace') }
+            { data: 3, title: t('description') },
+            { data: 4, title: t('namespace') }
         ];
-
-        const segmentsColumns = [
-            { data: 1, title: t('name') }
-        ];
-
-        const lstsEditEntries = [];
-        const lsts = this.getFormValue('lists') || [];
-        let lstOrderIdx = 0;
-        for (const lstUid of lsts) {
-            const prefix = 'lists_' + lstUid + '_';
-            const lstOrderIdxClosure = lstOrderIdx;
-
-            const selectedList = this.getFormValue(prefix + 'list');
-
-            lstsEditEntries.push(
-                <div key={lstUid} className={campaignsStyles.entry + ' ' + campaignsStyles.entryWithButtons}>
-                    <div className={campaignsStyles.entryButtons}>
-                        {lsts.length > 1 &&
-                        <Button
-                            className="btn-secondary"
-                            icon="trash-alt"
-                            title={t('remove')}
-                            onClickAsync={() => this.onRemoveListEntry(lstUid)}
-                        />
-                        }
-                        <Button
-                            className="btn-secondary"
-                            icon="plus"
-                            title={t('insertNewEntryBeforeThisOne')}
-                            onClickAsync={() => this.onAddListEntry(lstOrderIdxClosure)}
-                        />
-                        {lstOrderIdx > 0 &&
-                        <Button
-                            className="btn-secondary"
-                            icon="chevron-up"
-                            title={t('moveUp')}
-                            onClickAsync={() => this.onListEntryMoveUp(lstOrderIdxClosure)}
-                        />
-                        }
-                        {lstOrderIdx < lsts.length - 1 &&
-                        <Button
-                            className="btn-secondary"
-                            icon="chevron-down"
-                            title={t('moveDown')}
-                            onClickAsync={() => this.onListEntryMoveDown(lstOrderIdxClosure)}
-                        />
-                        }
-                    </div>
-                    <div className={campaignsStyles.entryContent}>
-                        <TableSelect id={prefix + 'list'} label={t('list')} withHeader dropdown dataUrl='rest/lists-table' columns={listsColumns} selectionLabelIndex={1} />
-
-                        {(campaignTypeKey === CampaignType.REGULAR || campaignTypeKey === CampaignType.RSS) &&
-                            <div>
-                                <CheckBox id={prefix + 'useSegmentation'} label={t('segment')} text={t('useAParticularSegment')}/>
-                                {selectedList && this.getFormValue(prefix + 'useSegmentation') &&
-                                    <TableSelect id={prefix + 'segment'} withHeader dropdown dataUrl={`rest/segments-table/${selectedList}`} columns={segmentsColumns} selectionLabelIndex={1} />
-                                }
-                            </div>
-                        }
-                    </div>
-                </div>
-            );
-
-            lstOrderIdx += 1;
-        }
-
-        const lstsEdit =
-            <Fieldset label={t('lists')}>
-                {lstsEditEntries}
-                <div key="newEntry" className={campaignsStyles.newEntry}>
-                    <Button
-                        className="btn-secondary"
-                        icon="plus"
-                        label={t('addList')}
-                        onClickAsync={() => this.onAddListEntry(lsts.length)}
-                    />
-                </div>
-            </Fieldset>;
-
 
         const sendConfigurationsColumns = [
             { data: 1, title: t('name') },
             { data: 2, title: t('id'), render: data => <code>{data}</code> },
             { data: 3, title: t('description') },
             { data: 4, title: t('type'), render: data => this.mailerTypes[data].typeName },
-            { data: 5, title: t('created'), render: data => moment(data).fromNow() },
             { data: 6, title: t('namespace') }
         ];
 
@@ -610,10 +600,10 @@ export default class CUD extends Component {
                 const addOverridable = (id, label) => {
                     if(this.state.sendConfiguration[id + '_overridable']){
                         if (this.getFormValue(id + '_overriden')) {
-                            sendSettings.push(<InputField label={t(label)} key={id + '_override'} id={id + '_override'}/>);
+                            sendSettings.push(<InputField label={label} key={id + '_override'} id={id + '_override'}/>);
                         } else {
                             sendSettings.push(
-                                <StaticField key={id + '_original'} label={t(label)} id={id + '_original'} className={styles.formDisabled}>
+                                <StaticField key={id + '_original'} label={label} id={id + '_original'} className={styles.formDisabled}>
                                     {this.state.sendConfiguration[id]}
                                 </StaticField>
                             );
@@ -622,7 +612,7 @@ export default class CUD extends Component {
                     }
                     else{
                         sendSettings.push(
-                            <StaticField key={id + '_original'} label={t(label)} id={id + '_original'} className={styles.formDisabled}>
+                            <StaticField key={id + '_original'} label={label} id={id + '_original'} className={styles.formDisabled}>
                                 {this.state.sendConfiguration[id]}
                             </StaticField>
                         );
@@ -632,7 +622,6 @@ export default class CUD extends Component {
                 addOverridable('from_name', t('fromName'));
                 addOverridable('from_email', t('fromEmailAddress'));
                 addOverridable('reply_to', t('replytoEmailAddress'));
-                addOverridable('subject', t('subjectLine'));
             } else {
                 sendSettings =  <AlignedRow>{t('loadingSendConfiguration')}</AlignedRow>
             }
@@ -656,8 +645,8 @@ export default class CUD extends Component {
                 { data: 1, title: t('name') },
                 { data: 2, title: t('description') },
                 { data: 3, title: t('type'), render: data => this.templateTypes[data].typeName },
-                { data: 4, title: t('created'), render: data => moment(data).fromNow() },
-                { data: 5, title: t('namespace') },
+                { data: 5, title: t('created'), render: data => moment(data).fromNow() },
+                { data: 6, title: t('namespace') },
             ];
 
             let help = null;
@@ -692,6 +681,8 @@ export default class CUD extends Component {
 
             templateEdit = <div>
                 <Dropdown id="data_sourceCustom_type" label={t('type')} options={this.customTemplateTypeOptions}/>
+                <Dropdown id="data_sourceCustom_tag_language" label={t('tagLanguage')} options={this.customTemplateTagLanguageOptions} disabled={isEdit}/>
+
                 {customTemplateTypeForm}
             </div>;
 
@@ -714,6 +705,12 @@ export default class CUD extends Component {
 
                 <Title>{isEdit ? this.editTitles[this.getFormValue('type')] : this.createTitles[this.getFormValue('type')]}</Title>
 
+                {!canModify &&
+                <div className="alert alert-warning" role="alert">
+                    <Trans><b>Warning!</b> You do not have necessary permissions to edit this campaign. Any changes that you perform here will be lost.</Trans>
+                </div>
+                }
+
                 {isEdit && this.props.entity.status === CampaignStatus.SENDING &&
                     <div className={`alert alert-info`} role="alert">
                         {t('formCannotBeEditedBecauseTheCampaignIs')}
@@ -731,13 +728,15 @@ export default class CUD extends Component {
 
                     <TextArea id="description" label={t('description')}/>
 
+                    <TableSelect id="channel" label={t('Channel')} withHeader withClear dropdown dataUrl='rest/channels-with-create-campaign-permission-table' columns={channelsColumns} selectionLabelIndex={1} />
+
                     {extraSettings}
 
                     <NamespaceSelect/>
 
                     <hr/>
 
-                    {lstsEdit}
+                    {this.listsSelectorHelper.render()}
 
                     <hr/>
 
@@ -747,12 +746,14 @@ export default class CUD extends Component {
 
                         {sendSettings}
 
+                        <InputField label={t('subjectLine')} key="subject" id="subject"/>
+
                         <InputField id="unsubscribe_url" label={t('customUnsubscribeUrl')}/>
                     </Fieldset>
 
                     <hr/>
 
-                    <Fieldset label={t('Tracking')}>
+                    <Fieldset label={t('tracking')}>
                         <CheckBox id="open_tracking_disabled" text={t('disableOpenedTracking')}/>
                         <CheckBox id="click_tracking_disabled" text={t('disableClickedTracking')}/>
                     </Fieldset>
@@ -766,18 +767,20 @@ export default class CUD extends Component {
                     </>
                     }
 
-
-
                     {templateEdit}
 
                     <ButtonRow>
-                        {!isEdit && (sourceTypeKey === CampaignSource.CUSTOM || sourceTypeKey === CampaignSource.CUSTOM_FROM_TEMPLATE || sourceTypeKey === CampaignSource.CUSTOM_FROM_CAMPAIGN) ?
-                            <Button type="submit" className="btn-primary" icon="check" label={t('Save and edit content')}/>
-                        :
+                        {canModify &&
                             <>
-                                <Button type="submit" className="btn-primary" icon="check" label={t('Save')}/>
-                                <Button type="submit" className="btn-primary" icon="check" label={t('Save and leave')} onClickAsync={async () => this.submitHandler(CUD.AfterSubmitAction.LEAVE)}/>
-                                <Button type="submit" className="btn-primary" icon="check" label={t('Save and go to status')} onClickAsync={async () => this.submitHandler(CUD.AfterSubmitAction.STATUS)}/>
+                                {!isEdit && (sourceTypeKey === CampaignSource.CUSTOM || sourceTypeKey === CampaignSource.CUSTOM_FROM_TEMPLATE || sourceTypeKey === CampaignSource.CUSTOM_FROM_CAMPAIGN) ?
+                                    <Button type="submit" className="btn-primary" icon="check" label={t('saveAndEditContent')}/>
+                                :
+                                    <>
+                                        <Button type="submit" className="btn-primary" icon="check" label={t('save')}/>
+                                        <Button type="submit" className="btn-primary" icon="check" label={t('saveAndLeave')} onClickAsync={async () => await this.submitHandler(CUD.AfterSubmitAction.LEAVE)}/>
+                                        <Button type="submit" className="btn-primary" icon="check" label={t('saveAndGoToStatus')} onClickAsync={async () => await this.submitHandler(CUD.AfterSubmitAction.STATUS)}/>
+                                    </>
+                                }
                             </>
                         }
                         {canDelete && <LinkButton className="btn-danger" icon="trash-alt" label={t('delete')} to={`/campaigns/${this.props.entity.id}/delete`}/> }

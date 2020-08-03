@@ -1,7 +1,7 @@
 'use strict';
 
 const passport = require('./passport');
-const config = require('config');
+const config = require('./config');
 const forms = require('../models/forms');
 const shares = require('../models/shares');
 const urls = require('./urls');
@@ -33,7 +33,7 @@ async function getAuthenticatedConfig(context) {
         globalPermissions[perm] = true;
     }
 
-    const setts = await settings.get(contextHelpers.getAdminContext(), ['mapsApiKey']);
+    const setts = await settings.get(contextHelpers.getAdminContext(), ['mapsApiKey', 'shoutout']);
 
     return {
         defaultCustomFormValues: await forms.getDefaultCustomFormValues(),
@@ -44,11 +44,13 @@ async function getAuthenticatedConfig(context) {
         },
         globalPermissions,
         editors: config.editors,
+        tagLanguages: config.tagLanguages,
         mosaico: config.mosaico,
         verpEnabled: config.verp.enabled,
         reportsEnabled: config.reports.enabled,
         mapsApiKey: setts.mapsApiKey,
-        builtinZoneMTAEnabled: config.builtinZoneMTA.enabled
+        builtinZoneMTAEnabled: config.builtinZoneMTA.enabled,
+        shoutout: setts.shoutout
     }
 }
 

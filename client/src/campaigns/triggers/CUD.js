@@ -1,21 +1,16 @@
 'use strict';
 
 import React, {Component} from 'react';
-import PropTypes
-    from 'prop-types';
+import PropTypes from 'prop-types';
 import {withTranslation} from '../../lib/i18n';
-import {
-    LinkButton,
-    requiresAuthenticatedUser,
-    Title,
-    withPageHelpers
-} from '../../lib/page';
+import {LinkButton, requiresAuthenticatedUser, Title, withPageHelpers} from '../../lib/page';
 import {
     AlignedRow,
     Button,
     ButtonRow,
     CheckBox,
     Dropdown,
+    filterData,
     Form,
     FormSendMethod,
     InputField,
@@ -26,12 +21,8 @@ import {
 import {withErrorHandling} from '../../lib/error-handling';
 import {DeleteModalDialog} from "../../lib/modals";
 import {getTriggerTypes} from './helpers';
-import {
-    Entity,
-    Event
-} from '../../../../shared/triggers';
-import moment
-    from 'moment';
+import {Entity, Event} from '../../../../shared/triggers';
+import moment from 'moment';
 import {getCampaignLabels} from "../helpers";
 import {withComponentMixins} from "../../lib/decorator-helpers";
 
@@ -52,7 +43,6 @@ export default class CUD extends Component {
         this.campaignTypeLabels = getCampaignLabels(props.t);
 
         const {entityLabels, eventLabels} = getTriggerTypes(props.t);
-        this.entityLabels = entityLabels;
 
         this.entityOptions = [
             {key: Entity.SUBSCRIPTION, label: entityLabels[Entity.SUBSCRIPTION]},
@@ -64,6 +54,7 @@ export default class CUD extends Component {
         this.eventOptions = {
             [Entity.SUBSCRIPTION]: [
                 {key: SubscriptionEvent.CREATED, label: eventLabels[Entity.SUBSCRIPTION][SubscriptionEvent.CREATED]},
+                {key: SubscriptionEvent.UPDATED, label: eventLabels[Entity.SUBSCRIPTION][SubscriptionEvent.UPDATED]},
                 {key: SubscriptionEvent.LATEST_OPEN, label: eventLabels[Entity.SUBSCRIPTION][SubscriptionEvent.LATEST_OPEN]},
                 {key: SubscriptionEvent.LATEST_CLICK, label: eventLabels[Entity.SUBSCRIPTION][SubscriptionEvent.LATEST_CLICK]}
             ],
@@ -102,9 +93,21 @@ export default class CUD extends Component {
         }
     }
 
+    submitFormValuesMutator(data) {
+        data.seconds = Number.parseInt(data.daysAfter) * 3600 * 24;
+
+        if (data.entity === Entity.SUBSCRIPTION) {
+            data.event = data.subscriptionEvent;
+        } else if (data.entity === Entity.CAMPAIGN) {
+            data.event = data.campaignEvent;
+        }
+
+        return filterData(data, ['name', 'description', 'entity', 'event', 'seconds', 'enabled', 'source_campaign']);
+    }
+
     componentDidMount() {
         if (this.props.entity) {
-            this.getFormValuesFromEntity(this.props.entity, ::this.getFormValuesMutator);
+            this.getFormValuesFromEntity(this.props.entity);
 
         } else {
             this.populateFormValues({
@@ -163,30 +166,22 @@ export default class CUD extends Component {
             this.disableForm();
             this.setFormStatusMessage('info', t('saving'));
 
-            const submitResult = await this.validateAndSendFormValuesToURL(sendMethod, url, data => {
-                data.seconds = Number.parseInt(data.daysAfter) * 3600 * 24;
-
-                if (data.entity === Entity.SUBSCRIPTION) {
-                    data.event = data.subscriptionEvent;
-                } else if (data.entity === Entity.CAMPAIGN) {
-                    data.event = data.campaignEvent;
-                }
-            });
+            const submitResult = await this.validateAndSendFormValuesToURL(sendMethod, url);
 
             if (submitResult) {
                 if (this.props.entity) {
                     if (submitAndLeave) {
-                        this.navigateToWithFlashMessage(`/campaigns/${this.props.campaign.id}/triggers`, 'success', t('Trigger updated'));
+                        this.navigateToWithFlashMessage(`/campaigns/${this.props.campaign.id}/triggers`, 'success', t('triggerUpdated'));
                     } else {
-                        await this.getFormValuesFromURL(`rest/triggers/${this.props.campaign.id}/${this.props.entity.id}`, ::this.getFormValuesMutator);
+                        await this.getFormValuesFromURL(`rest/triggers/${this.props.campaign.id}/${this.props.entity.id}`);
                         this.enableForm();
-                        this.setFormStatusMessage('success', t('Trigger updated'));
+                        this.setFormStatusMessage('success', t('triggerUpdated'));
                     }
                 } else {
                     if (submitAndLeave) {
-                        this.navigateToWithFlashMessage(`/campaigns/${this.props.campaign.id}/triggers`, 'success', t('Trigger created'));
+                        this.navigateToWithFlashMessage(`/campaigns/${this.props.campaign.id}/triggers`, 'success', t('triggerCreated'));
                     } else {
-                        this.navigateToWithFlashMessage(`/campaigns/${this.props.campaign.id}/triggers/${submitResult}/edit`, 'success', t('Trigger created'));
+                        this.navigateToWithFlashMessage(`/campaigns/${this.props.campaign.id}/triggers/${submitResult}/edit`, 'success', t('triggerCreated'));
                     }
                 }
             } else {
@@ -251,8 +246,8 @@ export default class CUD extends Component {
                     <CheckBox id="enabled" text={t('enabled')}/>
 
                     <ButtonRow>
-                        <Button type="submit" className="btn-primary" icon="check" label={t('Save')}/>
-                        <Button type="submit" className="btn-primary" icon="check" label={t('Save and leave')} onClickAsync={async () => this.submitHandler(true)}/>
+                        <Button type="submit" className="btn-primary" icon="check" label={t('save')}/>
+                        <Button type="submit" className="btn-primary" icon="check" label={t('saveAndLeave')} onClickAsync={async () => await this.submitHandler(true)}/>
                         {isEdit && <LinkButton className="btn-danger" icon="trash-alt" label={t('delete')} to={`/campaigns/${this.props.campaign.id}/triggers/${this.props.entity.id}/delete`}/>}
                     </ButtonRow>
                 </Form>

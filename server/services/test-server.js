@@ -1,7 +1,7 @@
 'use strict';
 
 const log = require('../lib/log');
-const config = require('config');
+const config = require('../lib/config');
 const crypto = require('crypto');
 const humanize = require('humanize');
 const http = require('http');
@@ -166,7 +166,7 @@ mailBoxServer.on('error', err => {
     log.error('Test SMTP Mailbox Server', err);
 });
 
-function spawn(callback) {
+function start(callback) {
     if (config.testServer.enabled) {
         server.listen(config.testServer.port, config.testServer.host, () => {
             log.info('Test SMTP', 'Server listening on port %s', config.testServer.port);
@@ -194,4 +194,4 @@ function spawn(callback) {
     }
 }
 
-module.exports.spawn = bluebird.promisify(spawn);
+module.exports.start = bluebird.promisify(start);

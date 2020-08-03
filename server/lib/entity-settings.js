@@ -44,6 +44,7 @@ const entityTypes = {
             },
             attachment: {
                 table: 'files_campaign_attachment',
+                inUseTable: 'files_campaign_attachment_usage',
                 permissions: {
                     view: 'viewAttachments',
                     manage: 'manageAttachments'
@@ -52,6 +53,12 @@ const entityTypes = {
             }
         },
         clientLink: id => `/campaigns/${id}`
+    },
+    channel: {
+        entitiesTable: 'channels',
+        sharesTable: 'shares_channel',
+        permissionsTable: 'permissions_channel',
+        clientLink: id => `/channels/${id}`
     },
     template: {
         entitiesTable: 'templates',

@@ -121,6 +121,32 @@ async function getByCid(context, cid) {
     });
 }
 
+async function getByNamespaceIdTx(tx, context, namespaceId) {
+  // FIXME - this methods is rather suboptimal if there are many lists. It quite needs permission caching in shares.js
+
+  const rows = await tx('lists').where('namespace', namespaceId);
+  await shares.enforceEntityPermissionTx(tx, context, 'namespace', namespaceId, 'view');
+
+  const allowed = [];
+
+  for (const list of rows) {
+    try {
+      await shares.enforceEntityPermissionTx(tx, context, 'list', list.id, 'view');
+    } catch(e) {
+      continue
+    }
+    allowed.push(list);
+  }
+
+  return allowed;
+}
+
+async function getByNamespaceId(context, namespaceId) {
+  return await knex.transaction(async tx => {
+    return getByNamespaceIdTx(tx, context, namespaceId);
+  });
+}
+
 async function _validateAndPreprocess(tx, entity) {
     await namespaceHelpers.validateEntity(tx, entity);
     enforce(entity.unsubscription_mode >= UnsubscriptionMode.MIN && entity.unsubscription_mode <= UnsubscriptionMode.MAX, 'Unknown unsubscription mode');
@@ -195,6 +221,7 @@ async function create(context, entity) {
             '  `latest_open` timestamp NULL DEFAULT NULL,\n' +
             '  `latest_click` timestamp NULL DEFAULT NULL,\n' +
             '  `created` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,\n' +
+            '  `updated` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,\n' +
             '  PRIMARY KEY (`id`),\n' +
             '  UNIQUE KEY `hash_email` (`hash_email`),\n' +
             '  UNIQUE KEY `cid` (`cid`),\n' +
@@ -204,7 +231,8 @@ async function create(context, entity) {
             '  KEY `is_test` (`is_test`),\n' +
             '  KEY `latest_open` (`latest_open`),\n' +
             '  KEY `latest_click` (`latest_click`),\n' +
-            '  KEY `created` (`created`)\n' +
+            '  KEY `created` (`created`),\n' +
+            '  KEY `updated` (`updated`)\n' +
             ') ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;\n');
 
         await shares.rebuildPermissionsTx(tx, { entityTypeId: 'list', entityId: id });
@@ -235,7 +263,7 @@ async function updateWithConsistencyCheck(context, entity) {
 
         await _validateAndPreprocess(tx, entity);
 
-        await namespaceHelpers.validateMove(context, entity, existing, 'list', 'createList', 'delete');
+        await namespaceHelpers.validateMoveTx(tx, context, entity, existing, 'list', 'createList', 'delete');
 
         await tx('lists').where('id', entity.id).update(filterObject(entity, allowedKeys));
 
@@ -281,6 +309,7 @@ module.exports.getById = getById;
 module.exports.getByIdWithListFields = getByIdWithListFields;
 module.exports.getByCidTx = getByCidTx;
 module.exports.getByCid = getByCid;
+module.exports.getByNamespaceId = getByNamespaceId;
 module.exports.create = create;
 module.exports.updateWithConsistencyCheck = updateWithConsistencyCheck;
 module.exports.remove = remove;

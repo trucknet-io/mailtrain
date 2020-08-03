@@ -1,39 +1,30 @@
 'use strict';
 
 import React, {Component} from 'react';
-import PropTypes
-    from 'prop-types';
+import PropTypes from 'prop-types';
 import {withTranslation} from '../lib/i18n';
-import {
-    LinkButton,
-    requiresAuthenticatedUser,
-    Title,
-    withPageHelpers
-} from '../lib/page';
+import {LinkButton, requiresAuthenticatedUser, Title, withPageHelpers} from '../lib/page';
 import {
     Button,
     ButtonRow,
+    filterData,
     Form,
     FormSendMethod,
     InputField,
     TextArea,
     TreeTableSelect,
-    withForm
+    withForm,
+    withFormErrorHandlers
 } from '../lib/form';
-import axios
-    from '../lib/axios';
-import {
-    withAsyncErrorHandler,
-    withErrorHandling
-} from '../lib/error-handling';
-import interoperableErrors
-    from '../../../shared/interoperable-errors';
+import axios from '../lib/axios';
+import {withAsyncErrorHandler, withErrorHandling} from '../lib/error-handling';
+import interoperableErrors from '../../../shared/interoperable-errors';
 import {DeleteModalDialog} from "../lib/modals";
-import mailtrainConfig
-    from 'mailtrainConfig';
+import mailtrainConfig from 'mailtrainConfig';
 import {getGlobalNamespaceId} from "../../../shared/namespaces";
 import {getUrl} from "../lib/urls";
 import {withComponentMixins} from "../lib/decorator-helpers";
+import {getDefaultNamespace} from "../lib/namespace";
 
 @withComponentMixins([
     withTranslation,
@@ -53,7 +44,12 @@ export default class CUD extends Component {
 
     static propTypes = {
         action: PropTypes.string.isRequired,
-        entity: PropTypes.object
+        entity: PropTypes.object,
+        permissions: PropTypes.object
+    }
+
+    submitFormValuesMutator(data) {
+        return filterData(data, ['name', 'description', 'namespace']);
     }
 
     isEditGlobal() {
@@ -88,9 +84,11 @@ export default class CUD extends Component {
                 this.removeNsIdSubtree(data);
             }
 
-            this.setState({
-                treeData: data
-            });
+            if (this.isComponentMounted()) {
+                this.setState({
+                    treeData: data
+                });
+            }
         }
     }
 
@@ -101,7 +99,7 @@ export default class CUD extends Component {
             this.populateFormValues({
                 name: '',
                 description: '',
-                namespace: mailtrainConfig.user.namespace
+                namespace: getDefaultNamespace(this.props.permissions)
             });
         }
 
@@ -127,6 +125,7 @@ export default class CUD extends Component {
         }
     }
 
+    @withFormErrorHandlers
     async submitHandler(submitAndLeave) {
         const t = this.props.t;
 
@@ -148,19 +147,19 @@ export default class CUD extends Component {
             if (submitResult) {
                 if (this.props.entity) {
                     if (submitAndLeave) {
-                        this.navigateToWithFlashMessage('/namespaces', 'success', t('Namespace updated'));
+                        this.navigateToWithFlashMessage('/namespaces', 'success', t('namespaceUpdated'));
                     } else {
                         await this.getFormValuesFromURL(`rest/namespaces/${this.props.entity.id}`);
                         await this.loadTreeData();
 
                         this.enableForm();
-                        this.setFormStatusMessage('success', t('Namespace updated'));
+                        this.setFormStatusMessage('success', t('namespaceUpdated'));
                     }
                 } else {
                     if (submitAndLeave) {
-                        this.navigateToWithFlashMessage('/namespaces', 'success', t('Namespace created'));
+                        this.navigateToWithFlashMessage('/namespaces', 'success', t('namespaceCreated'));
                     } else {
-                        this.navigateToWithFlashMessage(`/namespaces/${submitResult}/edit`, 'success', t('Namespace created'));
+                        this.navigateToWithFlashMessage(`/namespaces/${submitResult}/edit`, 'success', t('namespaceCreated'));
                     }
                 }
             } else {
@@ -196,7 +195,7 @@ export default class CUD extends Component {
     render() {
         const t = this.props.t;
         const isEdit = !!this.props.entity;
-        const canDelete = isEdit && !this.isEditGlobal() && this.props.entity.permissions.includes('delete');
+        const canDelete = isEdit && !this.isEditGlobal() && mailtrainConfig.user.namespace !== this.props.entity.id && this.props.entity.permissions.includes('delete');
 
         return (
             <div>
@@ -221,8 +220,8 @@ export default class CUD extends Component {
                     <TreeTableSelect id="namespace" label={t('parentNamespace')} data={this.state.treeData}/>}
 
                     <ButtonRow>
-                        <Button type="submit" className="btn-primary" icon="check" label={t('Save')}/>
-                        <Button type="submit" className="btn-primary" icon="check" label={t('Save and leave')} onClickAsync={async () => this.submitHandler(true)}/>
+                        <Button type="submit" className="btn-primary" icon="check" label={t('save')}/>
+                        <Button type="submit" className="btn-primary" icon="check" label={t('saveAndLeave')} onClickAsync={async () => await this.submitHandler(true)}/>
                         {canDelete && <LinkButton className="btn-danger" icon="trash-alt" label={t('delete')} to={`/namespaces/${this.props.entity.id}/delete`}/>}
                     </ButtonRow>
                 </Form>

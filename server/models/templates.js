@@ -7,12 +7,13 @@ const dtHelpers = require('../lib/dt-helpers');
 const interoperableErrors = require('../../shared/interoperable-errors');
 const namespaceHelpers = require('../lib/namespace-helpers');
 const shares = require('./shares');
-const reports = require('./reports');
 const files = require('./files');
 const dependencyHelpers = require('../lib/dependency-helpers');
 const {convertFileURLs} = require('../lib/campaign-content');
+const { allTagLanguages } = require('../../shared/templates');
+const messageSender = require('../lib/message-sender');
 
-const allowedKeys = new Set(['name', 'description', 'type', 'data', 'html', 'text', 'namespace']);
+const allowedKeys = new Set(['name', 'description', 'type', 'tag_language', 'data', 'html', 'text', 'namespace']);
 
 function hash(entity) {
     return hasher.hash(filterObject(entity, allowedKeys));
@@ -48,7 +49,7 @@ async function _listDTAjax(context, namespaceId, params) {
             }
             return builder;
         },
-        [ 'templates.id', 'templates.name', 'templates.description', 'templates.type', 'templates.created', 'namespaces.name' ]
+        [ 'templates.id', 'templates.name', 'templates.description', 'templates.type', 'templates.tag_language', 'templates.created', 'namespaces.name' ]
     );
 }
 
@@ -63,36 +64,49 @@ async function listByNamespaceDTAjax(context, namespaceId, params) {
 async function _validateAndPreprocess(tx, entity) {
     await namespaceHelpers.validateEntity(tx, entity);
 
-    // We don't check contents of the "data" because it is processed solely on the client. The client generates the HTML code we use when sending out campaigns.
+    enforce(allTagLanguages.includes(entity.tag_language), `Invalid tag language '${entity.tag_language}'`);
 
-    entity.data = JSON.stringify(entity.data);
+    // We don't check contents of the "data" because it is processed solely on the client. The client generates the HTML code we use when sending out campaigns.
 }
 
 async function create(context, entity) {
     return await knex.transaction(async tx => {
         await shares.enforceEntityPermissionTx(tx, context, 'namespace', entity.namespace, 'createTemplate');
 
-        if (entity.fromSourceTemplate) {
-            const template = await getByIdTx(tx, context, entity.sourceTemplate, false);
+        if (entity.fromExistingEntity) {
+            const existing = await getByIdTx(tx, context, entity.existingEntity, false);
 
-            entity.type = template.type;
-            entity.data = template.data;
-            entity.html = template.html;
-            entity.text = template.text;
+            entity.type = existing.type;
+            entity.tag_language = existing.tag_language;
+            entity.data = existing.data;
+            entity.html = existing.html;
+            entity.text = existing.text;
         }
 
         await _validateAndPreprocess(tx, entity);
 
-        const ids = await tx('templates').insert(filterObject(entity, allowedKeys));
+        const filteredEntityWithUnstringifiedData = filterObject(entity, allowedKeys);
+        const filteredEntity = {
+            ...filteredEntityWithUnstringifiedData,
+            data: JSON.stringify(filteredEntityWithUnstringifiedData.data)
+        };
+
+        const ids = await tx('templates').insert(filteredEntity);
         const id = ids[0];
 
         await shares.rebuildPermissionsTx(tx, { entityTypeId: 'template', entityId: id });
 
-        if (entity.fromSourceTemplate) {
-            await files.copyAllTx(tx, context, 'template', 'file', entity.sourceTemplate, 'template', 'file', id);
+        if (entity.fromExistingEntity) {
+            await files.copyAllTx(tx, context, 'template', 'file', entity.existingEntity, 'template', 'file', id);
 
-            convertFileURLs(entity, 'template', entity.sourceTemplate, 'template', id);
-            await tx('templates').update(filterObject(entity, allowedKeys)).where('id', id);
+            convertFileURLs(filteredEntityWithUnstringifiedData, 'template', entity.existingEntity, 'template', id);
+
+            const filteredEntity = {
+                ...filteredEntityWithUnstringifiedData,
+                data: JSON.stringify(filteredEntityWithUnstringifiedData.data)
+            };
+
+            await tx('templates').update(filteredEntity).where('id', id);
         }
 
         return id;
@@ -116,10 +130,13 @@ async function updateWithConsistencyCheck(context, entity) {
         }
 
         await _validateAndPreprocess(tx, entity);
+        entity.data = JSON.stringify(entity.data);
 
-        await namespaceHelpers.validateMove(context, entity, existing, 'template', 'createTemplate', 'delete');
+        await namespaceHelpers.validateMoveTx(tx, context, entity, existing, 'template', 'createTemplate', 'delete');
 
-        await tx('templates').where('id', entity.id).update(filterObject(entity, allowedKeys));
+        const filteredEntity = filterObject(entity, allowedKeys);
+
+        await tx('templates').where('id', entity.id).update(filteredEntity);
 
         await shares.rebuildPermissionsTx(tx, { entityTypeId: 'template', entityId: entity.id });
     });
@@ -145,6 +162,19 @@ async function remove(context, id) {
     });
 }
 
+async function sendAsTransactionalEmail(context, templateId, sendConfigurationId, emails, subject, mergeTags, attachments) {
+    const template = await getById(context, templateId, false);
+
+    await shares.enforceEntityPermission(context, 'sendConfiguration', sendConfigurationId, 'sendWithoutOverrides');
+
+    await knex.transaction(async tx => {
+		for (const email of emails) {
+			await messageSender.queueAPITransactionalMessageTx(tx, sendConfigurationId, email, subject, template.html, template.text, template.tag_language, {...mergeTags,  EMAIL: email }, attachments);
+		}
+	});
+}
+
+
 module.exports.hash = hash;
 module.exports.getByIdTx = getByIdTx;
 module.exports.getById = getById;
@@ -153,3 +183,4 @@ module.exports.listByNamespaceDTAjax = listByNamespaceDTAjax;
 module.exports.create = create;
 module.exports.updateWithConsistencyCheck = updateWithConsistencyCheck;
 module.exports.remove = remove;
+module.exports.sendAsTransactionalEmail = sendAsTransactionalEmail;

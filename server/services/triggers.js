@@ -10,6 +10,7 @@ const { Entity, Event } = require('../../shared/triggers');
 const { SubscriptionStatus } = require('../../shared/lists');
 const links = require('../models/links');
 const contextHelpers = require('../lib/context-helpers');
+const messageSender = require('../lib/message-sender');
 
 const triggerCheckPeriod = 30 * 1000;
 const triggerFirePeriod = 120 * 1000;
@@ -51,7 +52,8 @@ async function run() {
                     .where(function () {
                         addSegmentQuery(this);
                     })
-                    .whereNull('related_trigger_messages.id') // This means only those where the trigger has not fired yet somewhen in the past
+                    .whereNull('related_trigger_messages.id') // This means only those campaigns where one of their triggers has not fired yet somewhen in the past
+                    .where(subsTable + '.status', SubscriptionStatus.SUBSCRIBED)
                     .select(subsTable + '.id');
 
                 let column;
@@ -64,7 +66,7 @@ async function run() {
                         sqlQry = sqlQry.innerJoin(
                             function () {
                                 return this.from('campaign_messages')
-                                    .where('campaign_messages.campaign', campaign.id)
+                                    .where('campaign_messages.campaign', trigger.source_campaign)
                                     .where('campaign_messages.list', cpgList.list)
                                     .as('campaign_messages');
                             }, 'campaign_messages.subscription', subsTable + '.id');
@@ -75,7 +77,7 @@ async function run() {
                         sqlQry = sqlQry.innerJoin(
                             function () {
                                 return this.from('campaign_links')
-                                    .where('campaign_links.campaign', campaign.id)
+                                    .where('campaign_links.campaign', trigger.source_campaign)
                                     .where('campaign_links.list', cpgList.list)
                                     .where('campaign_links.link', links.LinkId.OPEN)
                                     .as('campaign_links');
@@ -87,7 +89,7 @@ async function run() {
                         sqlQry = sqlQry.innerJoin(
                             function () {
                                 return this.from('campaign_links')
-                                    .where('campaign_links.campaign', campaign.id)
+                                    .where('campaign_links.campaign', trigger.source_campaign)
                                     .where('campaign_links.list', cpgList.list)
                                     .where('campaign_links.link', links.LinkId.GENERAL_CLICK)
                                     .as('campaign_links');
@@ -99,7 +101,7 @@ async function run() {
                         sqlQry = sqlQry.innerJoin(
                             function () {
                                 return this.from('campaign_messages')
-                                    .where('campaign_messages.campaign', campaign.id)
+                                    .where('campaign_messages.campaign', trigger.source_campaign)
                                     .where('campaign_messages.list', cpgList.list)
                                     .as('campaign_messages');
                             }, 'campaign_messages.subscription', subsTable + '.id')
@@ -108,7 +110,7 @@ async function run() {
                                     .select('*')
                                     .from('campaign_links')
                                     .whereRaw(`campaign_links.subscription = ${subsTable}.id`)
-                                    .where('campaign_links.campaign', campaign.id)
+                                    .where('campaign_links.campaign', trigger.source_campaign)
                                     .where('campaign_links.list', cpgList.list)
                                     .where('campaign_links.link', links.LinkId.OPEN);
                             });
@@ -119,7 +121,7 @@ async function run() {
                         sqlQry = sqlQry.innerJoin(
                             function () {
                                 return this.from('campaign_messages')
-                                    .where('campaign_messages.campaign', campaign.id)
+                                    .where('campaign_messages.campaign', trigger.source_campaign)
                                     .where('campaign_messages.list', cpgList.list)
                                     .as('campaign_messages');
                             }, 'campaign_messages.subscription', subsTable + '.id')
@@ -128,7 +130,7 @@ async function run() {
                                     .select('*')
                                     .from('campaign_links')
                                     .whereRaw(`campaign_links.subscription = ${subsTable}.id`)
-                                    .where('campaign_links.campaign', campaign.id)
+                                    .where('campaign_links.campaign', trigger.source_campaign)
                                     .where('campaign_links.list', cpgList.list)
                                     .where('campaign_links.link', links.LinkId.GENERAL_CLICK);
                             });
@@ -137,10 +139,10 @@ async function run() {
                     }
                 }
 
-                sqlQry = sqlQry.where(column, '<=', new Date(currentTs - trigger.seconds));
+                sqlQry = sqlQry.where(column, '<=', new Date(currentTs - trigger.seconds * 1000));
 
                 if (trigger.last_check !== null) {
-                    sqlQry = sqlQry.where(column, '>', trigger.last_check);
+                    sqlQry = sqlQry.where(column, '>', new Date(trigger.last_check - trigger.seconds * 1000));
                 }
 
                 const subscribers = await sqlQry;
@@ -151,12 +153,13 @@ async function run() {
                         subscription: subscriber.id
                     });
 
-                    await tx('queued').insert({
-                        campaign: campaign.id,
-                        list: cpgList.list,
-                        subscription: subscriber.id,
-                        trigger: trigger.id
-                    });
+                    await messageSender.queueCampaignMessageTx(tx,
+                        campaign.send_configuration, cpgList.list, subscriber.id, messageSender.MessageType.TRIGGERED,
+                        {
+                            campaignId: campaign.id,
+                            triggerId: trigger.id
+                        }
+                    );
 
                     await tx('triggers').increment('count').where('id', trigger.id);
 

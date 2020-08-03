@@ -1,39 +1,32 @@
 'use strict';
 
 import React, {Component} from 'react';
-import PropTypes
-    from 'prop-types';
+import PropTypes from 'prop-types';
 import {withTranslation} from '../../lib/i18n';
-import {
-    LinkButton,
-    requiresAuthenticatedUser,
-    Title,
-    withPageHelpers
-} from '../../lib/page'
+import {LinkButton, requiresAuthenticatedUser, Title, withPageHelpers} from '../../lib/page'
 import {
     Button,
     ButtonRow,
     Dropdown,
+    filterData,
     Form,
     FormSendMethod,
-    InputField, StaticField,
+    InputField,
+    StaticField,
     TextArea,
-    withForm
+    withForm,
+    withFormErrorHandlers
 } from '../../lib/form';
 import {withErrorHandling} from '../../lib/error-handling';
-import {
-    NamespaceSelect,
-    validateNamespace
-} from '../../lib/namespace';
+import {getDefaultNamespace, NamespaceSelect, validateNamespace} from '../../lib/namespace';
 import {DeleteModalDialog} from "../../lib/modals";
-
-import {getVersafix, getMJMLSample} from "../../../../shared/mosaico-templates";
-import {
-    getTemplateTypes,
-    getTemplateTypesOrder
-} from "./helpers";
+import mailtrainConfig from 'mailtrainConfig';
+import {getMJMLSample, getVersafix} from "../../../../shared/mosaico-templates";
+import {getTemplateTypes, getTemplateTypesOrder} from "./helpers";
 import {withComponentMixins} from "../../lib/decorator-helpers";
 import styles from "../../lib/styles.scss";
+import {getTagLanguages} from "../helpers";
+import {Trans} from "react-i18next";
 
 @withComponentMixins([
     withTranslation,
@@ -47,6 +40,7 @@ export default class CUD extends Component {
         super(props);
 
         this.templateTypes = getTemplateTypes(props.t);
+        this.tagLanguages = getTagLanguages(props.t);
 
         this.typeOptions = [];
         for (const type of getTemplateTypesOrder()) {
@@ -58,22 +52,38 @@ export default class CUD extends Component {
 
         this.state = {};
 
-        this.initForm();
+        this.initForm({
+            leaveConfirmation: !props.entity || props.entity.permissions.includes('edit'),
+        });
     }
 
     static propTypes = {
         action: PropTypes.string.isRequired,
         wizard: PropTypes.string,
-        entity: PropTypes.object
+        entity: PropTypes.object,
+        permissions: PropTypes.object
     }
 
     getFormValuesMutator(data) {
         this.templateTypes[data.type].afterLoad(this, data);
     }
 
+    submitFormValuesMutator(data) {
+        const wizard = this.props.wizard;
+
+        if (wizard === 'versafix') {
+            data.html = getVersafix(data.tag_language);
+        } else if (wizard === 'mjml-sample') {
+            data.mjml = getMJMLSample(data.tag_language);
+        }
+
+        this.templateTypes[data.type].beforeSave(this, data);
+        return filterData(data, ['name', 'description', 'type', 'tag_language', 'data', 'namespace']);
+    }
+
     componentDidMount() {
         if (this.props.entity) {
-            this.getFormValuesFromEntity(this.props.entity, ::this.getFormValuesMutator);
+            this.getFormValuesFromEntity(this.props.entity);
 
         } else {
             const wizard = this.props.wizard;
@@ -82,26 +92,27 @@ export default class CUD extends Component {
                 this.populateFormValues({
                     name: '',
                     description: '',
-                    namespace: mailtrainConfig.user.namespace,
+                    namespace: getDefaultNamespace(this.props.permissions),
                     type: 'html',
-                    html: getVersafix()
+                    tag_language: mailtrainConfig.tagLanguages[0]
                 });
 
             } else if (wizard === 'mjml-sample') {
                 this.populateFormValues({
                     name: '',
                     description: '',
-                    namespace: mailtrainConfig.user.namespace,
+                    namespace: getDefaultNamespace(this.props.permissions),
                     type: 'mjml',
-                    mjml: getMJMLSample()
+                    tag_language: mailtrainConfig.tagLanguages[0]
                 });
 
             } else {
                 this.populateFormValues({
                     name: '',
                     description: '',
-                    namespace: mailtrainConfig.user.namespace,
+                    namespace: getDefaultNamespace(this.props.permissions),
                     type: 'html',
+                    tag_language: mailtrainConfig.tagLanguages[0],
                     html: ''
                 });
             }
@@ -123,9 +134,16 @@ export default class CUD extends Component {
             state.setIn(['type', 'error'], null);
         }
 
+        if (!state.getIn(['tag_language', 'value'])) {
+            state.setIn(['tag_language', 'error'], t('tagLanguageMustBeSelected'));
+        } else {
+            state.setIn(['tag_language', 'error'], null);
+        }
+
         validateNamespace(t, state);
     }
 
+    @withFormErrorHandlers
     async submitHandler(submitAndLeave) {
         const t = this.props.t;
 
@@ -141,24 +159,22 @@ export default class CUD extends Component {
         this.disableForm();
         this.setFormStatusMessage('info', t('saving'));
 
-        const submitResult = await this.validateAndSendFormValuesToURL(sendMethod, url, data => {
-            this.templateTypes[data.type].beforeSave(this, data);
-        });
+        const submitResult = await this.validateAndSendFormValuesToURL(sendMethod, url);
 
         if (submitResult) {
             if (this.props.entity) {
                 if (submitAndLeave) {
-                    this.navigateToWithFlashMessage('/templates/mosaico', 'success', t('Mosaico template updated'));
+                    this.navigateToWithFlashMessage('/templates/mosaico', 'success', t('mosaicoTemplateUpdated'));
                 } else {
-                    await this.getFormValuesFromURL(`rest/mosaico-templates/${this.props.entity.id}`, ::this.getFormValuesMutator);
+                    await this.getFormValuesFromURL(`rest/mosaico-templates/${this.props.entity.id}`);
                     this.enableForm();
-                    this.setFormStatusMessage('success', t('Mosaico template updated'));
+                    this.setFormStatusMessage('success', t('mosaicoTemplateUpdated'));
                 }
             } else {
                 if (submitAndLeave) {
-                    this.navigateToWithFlashMessage('/templates/mosaico', 'success', t('Mosaico template created'));
+                    this.navigateToWithFlashMessage('/templates/mosaico', 'success', t('mosaicoTemplateCreated'));
                 } else {
-                    this.navigateToWithFlashMessage(`/templates/mosaico/${submitResult}/edit`, 'success', t('Mosaico template created'));
+                    this.navigateToWithFlashMessage(`/templates/mosaico/${submitResult}/edit`, 'success', t('mosaicoTemplateCreated'));
                 }
             }
         } else {
@@ -170,9 +186,15 @@ export default class CUD extends Component {
     render() {
         const t = this.props.t;
         const isEdit = !!this.props.entity;
+        const canModify = !isEdit || this.props.entity.permissions.includes('edit');
         const canDelete = isEdit && this.props.entity.permissions.includes('delete');
 
         const typeKey = this.getFormValue('type');
+
+        const tagLanguageOptions = [];
+        for (const key of mailtrainConfig.tagLanguages) {
+            tagLanguageOptions.push({key, label: this.tagLanguages[key].name});
+        }
 
         return (
             <div>
@@ -189,6 +211,12 @@ export default class CUD extends Component {
 
                 <Title>{isEdit ? t('editMosaicoTemplate') : t('createMosaicoTemplate')}</Title>
 
+                {!canModify &&
+                <div className="alert alert-warning" role="alert">
+                    <Trans><b>Warning!</b> You do not have necessary permissions to edit this Mosaico template. Any changes that you perform here will be lost.</Trans>
+                </div>
+                }
+
                 <Form stateOwner={this} onSubmitAsync={::this.submitHandler}>
                     <InputField id="name" label={t('name')}/>
                     <TextArea id="description" label={t('description')}/>
@@ -199,13 +227,26 @@ export default class CUD extends Component {
                         :
                         <Dropdown id="type" label={t('type')} options={this.typeOptions}/>
                     }
+
+                    <Dropdown id="tag_language" label={t('tagLanguage')} options={tagLanguageOptions}/>
+
                     <NamespaceSelect/>
 
                     {isEdit && typeKey && this.templateTypes[typeKey].getForm(this)}
 
                     <ButtonRow>
-                        <Button type="submit" className="btn-primary" icon="check" label={t('save')}/>
-                        <Button type="submit" className="btn-primary" icon="check" label={t('Save and leave')} onClickAsync={async () => this.submitHandler(true)}/>
+                        {canModify &&
+                            <>
+                                {isEdit ?
+                                    <>
+                                        <Button type="submit" className="btn-primary" icon="check" label={t('save')}/>
+                                        <Button type="submit" className="btn-primary" icon="check" label={t('saveAndLeave')} onClickAsync={async () => await this.submitHandler(true)}/>
+                                    </>
+                                :
+                                    <Button type="submit" className="btn-primary" icon="check" label={t('saveAndEditContent')}/>
+                                }
+                            </>
+                        }
                         {canDelete && <LinkButton className="btn-danger" icon="trash-alt" label={t('delete')} to={`/templates/mosaico/${this.props.entity.id}/delete`}/>}
                         {isEdit && typeKey && this.templateTypes[typeKey].getButtons(this)}
                     </ButtonRow>

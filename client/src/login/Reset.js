@@ -2,29 +2,22 @@
 
 import React, {Component} from 'react';
 import {withTranslation} from '../lib/i18n';
-import {
-    Title,
-    withPageHelpers
-} from '../lib/page'
+import {Title, withPageHelpers} from '../lib/page'
 import {Link} from 'react-router-dom'
 import {
     Button,
     ButtonRow,
+    filterData,
     Form,
     FormSendMethod,
     InputField,
-    withForm
+    withForm,
+    withFormErrorHandlers
 } from '../lib/form';
-import {
-    withAsyncErrorHandler,
-    withErrorHandling
-} from '../lib/error-handling';
-import passwordValidator
-    from '../../../shared/password-validator';
-import axios
-    from '../lib/axios';
-import interoperableErrors
-    from '../../../shared/interoperable-errors';
+import {withAsyncErrorHandler, withErrorHandling} from '../lib/error-handling';
+import passwordValidator from '../../../shared/password-validator';
+import axios from '../lib/axios';
+import interoperableErrors from '../../../shared/interoperable-errors';
 import {getUrl} from "../lib/urls";
 import {withComponentMixins} from "../lib/decorator-helpers";
 
@@ -50,7 +43,13 @@ export default class Account extends Component {
             resetTokenValidationState: ResetTokenValidationState.PENDING
         };
 
-        this.initForm();
+        this.initForm({
+            leaveConfirmation: false
+        });
+    }
+
+    submitFormValuesMutator(data) {
+        return filterData(data, ['username', 'password', 'resetToken']);
     }
 
     @withAsyncErrorHandler
@@ -102,6 +101,7 @@ export default class Account extends Component {
         state.setIn(['password2', 'error'], password !== password2 ? t('passwordsMustMatch') : null);
     }
 
+    @withFormErrorHandlers
     async submitHandler() {
         const t = this.props.t;
 
@@ -109,9 +109,7 @@ export default class Account extends Component {
             this.disableForm();
             this.setFormStatusMessage('info', t('resettingPassword'));
 
-            const submitSuccessful = await this.validateAndSendFormValuesToURL(FormSendMethod.POST, 'rest/password-reset', data => {
-                delete data.password2;
-            });
+            const submitSuccessful = await this.validateAndSendFormValuesToURL(FormSendMethod.POST, 'rest/password-reset');
 
             if (submitSuccessful) {
                 this.navigateToWithFlashMessage('/login', 'success', t('passwordReset-1'));

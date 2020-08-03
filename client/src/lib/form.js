@@ -14,8 +14,8 @@ import {Button} from "./bootstrap-components";
 import {SketchPicker} from 'react-color';
 
 import ACEEditorRaw from 'react-ace';
-import 'brace/theme/github';
-import 'brace/ext/searchbox';
+import 'ace-builds/src-noconflict/theme-github';
+import 'ace-builds/src-noconflict/ext-searchbox';
 
 import DayPicker from 'react-day-picker';
 import 'react-day-picker/lib/style.css';
@@ -46,14 +46,26 @@ const FormSendMethod = HTTPMethod;
 
 export const FormStateOwnerContext = React.createContext(null);
 
-const withFormStateOwner = createComponentMixin([{context: FormStateOwnerContext, propName: 'formStateOwner'}], [], (TargetClass, InnerClass) => {
-    InnerClass.prototype.getFormStateOwner = function() {
-        return this.props.formStateOwner;
-    }
+const withFormStateOwner = createComponentMixin({
+    contexts: [{context: FormStateOwnerContext, propName: 'formStateOwner'}],
+    decoratorFn: (TargetClass, InnerClass) => {
+        InnerClass.prototype.getFormStateOwner = function () {
+            return this.props.formStateOwner;
+        };
 
-    return {};
+        return {};
+    }
 });
 
+export function withFormErrorHandlers(target, name, descriptor) {
+    const asyncFn = descriptor.value;
+
+    descriptor.value = async function(...args) {
+        await this.formHandleErrors(async () => await asyncFn.apply(this, args));
+    };
+
+    return descriptor;
+}
 
 @withComponentMixins([
     withTranslation,
@@ -61,11 +73,28 @@ const withFormStateOwner = createComponentMixin([{context: FormStateOwnerContext
     withPageHelpers
 ])
 class Form extends Component {
+    constructor(props) {
+        super(props);
+
+        this.beforeUnloadHandlers = {
+            handler: () => this.props.stateOwner.isFormChanged(),
+            handlerAsync: async () => await this.props.stateOwner.isFormChangedAsync()
+        };
+    }
+
     static propTypes = {
         stateOwner: PropTypes.object.isRequired,
         onSubmitAsync: PropTypes.func,
         format: PropTypes.string,
         noStatus: PropTypes.bool
+    }
+
+    componentDidMount() {
+        this.registerBeforeUnloadHandlers(this.beforeUnloadHandlers);
+    }
+
+    componentWillUnmount() {
+        this.deregisterBeforeUnloadHandlers(this.beforeUnloadHandlers);
     }
 
     @withAsyncErrorHandler
@@ -77,7 +106,7 @@ class Form extends Component {
         evt.preventDefault();
 
         if (this.props.onSubmitAsync) {
-            await owner.formHandleChangedError(async () => await this.props.onSubmitAsync());
+            await this.props.onSubmitAsync();
         }
     }
 
@@ -219,7 +248,7 @@ function wrapInput(id, htmlId, owner, format, rightContainerClass, label, help, 
 
     if (format === 'inline') {
         return (
-            <div className={className} >
+            <div className={className}>
                 {labelBlock}{input}
                 {helpBlock}
                 {validationBlock}
@@ -227,7 +256,7 @@ function wrapInput(id, htmlId, owner, format, rightContainerClass, label, help, 
         );
     } else {
         return (
-            <div className={className} >
+            <div className={className}>
                 {labelBlock}
                 <div className={`${colRight} ${rightContainerClass}`}>
                     {input}
@@ -275,6 +304,7 @@ class StaticField extends Component {
 }
 
 @withComponentMixins([
+    withTranslation,
     withFormStateOwner
 ])
 class InputField extends Component {
@@ -284,18 +314,38 @@ class InputField extends Component {
         placeholder: PropTypes.string,
         type: PropTypes.string,
         help: PropTypes.oneOfType([PropTypes.string, PropTypes.object]),
-        format: PropTypes.string
+        format: PropTypes.string,
+        // TODO FOR MAILTRAIN added dropdown with hints under input
+        withHints: PropTypes.array,
+        disabled: PropTypes.bool
     }
 
     static defaultProps = {
         type: 'text'
     }
 
+    constructor() {
+        super();
+        this.state = {showHints: false};
+        this.textInput = React.createRef();
+    }
+
+    onFocus() {
+        this.setState({showHints: true});
+    }
+
+    onBlur() {
+        this.setState({showHints: false});
+    }
+
     render() {
         const props = this.props;
+        const t = props.t;
         const owner = this.getFormStateOwner();
-        const id = this.props.id;
+        const id = props.id;
         const htmlId = 'form_' + id;
+        const enableHints = !!(props.withHints && !props.disabled);
+
 
         let type = 'text';
         if (props.type === 'password') {
@@ -306,15 +356,88 @@ class InputField extends Component {
 
         const className = owner.addFormValidationClass('form-control', id);
 
-        return wrapInput(id, htmlId, owner, props.format, '', props.label, props.help,
-            <input type={type} value={owner.getFormValue(id)} placeholder={props.placeholder} id={htmlId} className={className} aria-describedby={htmlId + '_help'} onChange={evt => owner.updateFormValue(id, evt.target.value)}/>
+        /* This is for debugging purposes when React reports that InputField is uncontrolled
+        const value = owner.getFormValue(id);
+        if (value === null || value === undefined) console.log(`Warning: InputField ${id} is ${value}`);
+        */
+        const value = owner.getFormValue(id);
+        if (value === null || value === undefined) console.log(`Warning: InputField ${id} is ${value}`);
+
+        let hintsFuns = {};
+        if (enableHints) {
+            hintsFuns['onFocus'] = ::this.onFocus;
+            hintsFuns['onBlur'] = ::this.onBlur;
+        }
+
+        let inputContent = (
+            <input ref={this.textInput}
+                   type={type}
+                   value={owner.getFormValue(id)}
+                   placeholder={props.placeholder}
+                   id={htmlId}
+                   className={className}
+                   aria-describedby={htmlId + '_help'}
+                   onChange={evt => owner.updateFormValue(id, evt.target.value)}
+                   disabled={props.disabled}
+                   {...hintsFuns}
+            />
         );
+
+        if (enableHints) {
+            inputContent = (
+                <div className="input-group">
+                    {inputContent}
+                    <div className="input-group-append" onMouseDown={evt => evt.preventDefault()}>
+                        <Button label={t('Hints')} className="btn-secondary"
+                                onClickAsync={evt => {
+                                    if (!this.state.showHints) {
+                                        this.textInput.current.focus();
+                                    } else {
+                                        this.textInput.current.blur();
+                                    }
+                                }}/>
+                    </div>
+                </div>
+            );
+
+            let hintsDropdown = null;
+            if (this.state.showHints) {
+                const hints = [];
+                for (const hint of props.withHints) {
+                    hints.push(
+                        <li
+                            key={hint}
+                            className={`list-group-item list-group-item-action list-group-item-light ${styles.inputHint}`}
+                            onClick={evt => {
+                                this.textInput.current.blur();
+                                owner.updateFormValue(id, hint);
+                            }}
+                            onMouseDown={evt => evt.preventDefault()}
+                        >
+                            {hint}
+                        </li>
+                    )
+                }
+
+                hintsDropdown = (
+                    <div className={`list-group ${styles.inputHints}`}>
+                        {hints}
+                    </div>
+                )
+            }
+
+            inputContent = (
+                <div className={styles.inputContainer}>
+                    {inputContent}
+                    {hintsDropdown}
+                </div>
+            );
+        }
+
+        return wrapInput(id, htmlId, owner, props.format, '', props.label, props.help, inputContent);
     }
 }
 
-@withComponentMixins([
-    withFormStateOwner
-])
 class CheckBox extends Component {
     static propTypes = {
         id: PropTypes.string.isRequired,
@@ -326,19 +449,32 @@ class CheckBox extends Component {
     }
 
     render() {
-        const props = this.props;
-        const owner = this.getFormStateOwner();
-        const id = this.props.id;
-        const htmlId = 'form_' + id;
+        return (
+            <FormStateOwnerContext.Consumer>
+                {
+                    owner => {
+                        const props = this.props;
+                        const id = this.props.id;
+                        const htmlId = 'form_' + id;
 
-        const inputClassName = owner.addFormValidationClass('form-check-input', id);
+                        const inputClassName = owner.addFormValidationClass('form-check-input', id);
 
-        return wrapInput(id, htmlId, owner, props.format, '', props.label, props.help,
-            <div className={`form-group form-check my-2 ${this.props.className}`}>
-                <input className={inputClassName} type="checkbox" checked={owner.getFormValue(id)} id={htmlId} aria-describedby={htmlId + '_help'} onChange={evt => owner.updateFormValue(id, !owner.getFormValue(id))}/>
-                <label className={styles.checkboxText} htmlFor={htmlId}>{props.text}</label>
-            </div>
+                        return wrapInput(id, htmlId, owner, props.format, '', props.label, props.help,
+                            <div className={`form-group form-check my-2 ${this.props.className}`}>
+                                <input className={inputClassName} type="checkbox"
+                                       checked={owner.getFormValue(id)}
+                                       id={htmlId}
+                                       aria-describedby={htmlId + '_help'}
+                                       onChange={evt => owner.updateFormValue(id, !owner.getFormValue(id))}/>
+                                <label className={styles.checkboxText} htmlFor={htmlId}>{props.text}</label>
+                            </div>
+                        );
+                    }
+
+                }
+            </FormStateOwnerContext.Consumer>
         );
+
     }
 }
 
@@ -385,7 +521,11 @@ class CheckBoxGroup extends Component {
 
             let number = options.push(
                 <div key={option.key} className="form-group form-check my-2">
-                    <input id={optId} type="checkbox" className={optClassName} checked={selection.includes(option.key)} onChange={evt => this.onChange(option.key)}/>
+                    <input id={optId}
+                           type="checkbox"
+                           className={optClassName}
+                           checked={selection.includes(option.key)}
+                           onChange={evt => this.onChange(option.key)}/>
                     <label className="form-check-label" htmlFor={optId}>{option.label}</label>
                 </div>
             );
@@ -433,7 +573,12 @@ class RadioGroup extends Component {
 
             let number = options.push(
                 <div key={option.key} className="form-group form-check my-2">
-                    <input id={optId} type="radio" className={optClassName} name={htmlId} checked={value === option.key} onChange={evt => owner.updateFormValue(id, option.key)}/>
+                    <input id={optId}
+                           type="radio"
+                           className={optClassName}
+                           name={htmlId}
+                           checked={value === option.key}
+                           onChange={evt => owner.updateFormValue(id, option.key)}/>
                     <label className="form-check-label" htmlFor={optId}>{option.label}</label>
                 </div>
             );
@@ -456,6 +601,15 @@ class RadioGroup extends Component {
     withFormStateOwner
 ])
 class TextArea extends Component {
+    constructor() {
+        super();
+        this.onChange = evt => {
+            const id = this.props.id;
+            const owner = this.getFormStateOwner();
+            owner.updateFormValue(id, evt.target.value);
+        }
+    }
+
     static propTypes = {
         id: PropTypes.string.isRequired,
         label: PropTypes.string.isRequired,
@@ -470,10 +624,15 @@ class TextArea extends Component {
         const owner = this.getFormStateOwner();
         const id = props.id;
         const htmlId = 'form_' + id;
-        const className = owner.addFormValidationClass('form-control ' + (props.className || '') , id);
+        const className = owner.addFormValidationClass('form-control ' + (props.className || ''), id);
 
         return wrapInput(id, htmlId, owner, props.format, '', props.label, props.help,
-            <textarea id={htmlId} placeholder={props.placeholder} value={owner.getFormValue(id) || ''} className={className} aria-describedby={htmlId + '_help'} onChange={evt => owner.updateFormValue(id, evt.target.value)}></textarea>
+            <textarea id={htmlId}
+                      placeholder={props.placeholder}
+                      value={owner.getFormValue(id) || ''}
+                      className={className}
+                      aria-describedby={htmlId + '_help'}
+                      onChange={this.onChange}></textarea>
         );
     }
 }
@@ -526,12 +685,13 @@ class ColorPicker extends Component {
             <div>
                 <div className="input-group">
                     <div className={styles.colorPickerSwatchWrapper} onClick={::this.toggle}>
-                        <div className={styles.colorPickerSwatchColor} style={{background: `rgba(${ color.r }, ${ color.g }, ${ color.b }, ${ color.a })`}}/>
+                        <div className={styles.colorPickerSwatchColor}
+                             style={{background: `rgba(${color.r}, ${color.g}, ${color.b}, ${color.a})`}}/>
                     </div>
                 </div>
                 {this.state.opened &&
                 <div className={styles.colorPickerWrapper}>
-                    <SketchPicker color={color} onChange={::this.selected} />
+                    <SketchPicker color={color} onChange={::this.selected}/>
                 </div>
                 }
             </div>
@@ -560,7 +720,8 @@ class DatePicker extends Component {
         birthday: PropTypes.bool,
         dateFormat: PropTypes.string,
         formatDate: PropTypes.func,
-        parseDate: PropTypes.func
+        parseDate: PropTypes.func,
+        disabled: PropTypes.bool
     }
 
     static defaultProps = {
@@ -596,7 +757,7 @@ class DatePicker extends Component {
         const htmlId = 'form_' + id;
         const t = props.t;
 
-        function BirthdayPickerCaption({ date, localeUtils, onChange }) {
+        function BirthdayPickerCaption({date, localeUtils, onChange}) {
             const months = localeUtils.getMonths();
             return (
                 <div className="DayPicker-Caption">
@@ -644,11 +805,17 @@ class DatePicker extends Component {
 
         return wrapInput(id, htmlId, owner, props.format, '', props.label, props.help,
             <>
-                <div className="input-group">
-                    <input type="text" value={selectedDateStr} placeholder={placeholder} id={htmlId} className={className} aria-describedby={htmlId + '_help'} onChange={evt => owner.updateFormValue(id, evt.target.value)}/>
+                <div className={props.disabled ? '' : "input-group"}>
+                    <input type="text" value={selectedDateStr} placeholder={placeholder} id={htmlId}
+                           className={className} aria-describedby={htmlId + '_help'}
+                           onChange={evt => owner.updateFormValue(id, evt.target.value)}
+                           disabled={props.disabled}/>
+                    {!props.disabled &&
                     <div className="input-group-append">
-                        <Button iconTitle={t('openCalendar')} className="btn-secondary" icon="calendar-alt" onClickAsync={::this.toggleDayPicker}/>
+                        <Button iconTitle={t('openCalendar')} className="btn-secondary" icon="calendar-alt"
+                                onClickAsync={::this.toggleDayPicker}/>
                     </div>
+                    }
                 </div>
                 {this.state.opened &&
                 <div className={styles.dayPickerWrapper}>
@@ -678,7 +845,8 @@ class Dropdown extends Component {
         help: PropTypes.oneOfType([PropTypes.string, PropTypes.object]),
         options: PropTypes.array,
         className: PropTypes.string,
-        format: PropTypes.string
+        format: PropTypes.string,
+        disabled: PropTypes.bool
     }
 
     render() {
@@ -703,10 +871,15 @@ class Dropdown extends Component {
             }
         }
 
-        const className = owner.addFormValidationClass('form-control ' + (props.className || '') , id);
+        const className = owner.addFormValidationClass('form-control ' + (props.className || ''), id);
 
         return wrapInput(id, htmlId, owner, props.format, '', props.label, props.help,
-            <select id={htmlId} className={className} aria-describedby={htmlId + '_help'} value={owner.getFormValue(id)} onChange={evt => owner.updateFormValue(id, evt.target.value)}>
+            <select id={htmlId}
+                    className={className}
+                    aria-describedby={htmlId + '_help'}
+                    value={owner.getFormValue(id)}
+                    onChange={evt => owner.updateFormValue(id, evt.target.value)}
+                    disabled={props.disabled}>
                 {options}
             </select>
         );
@@ -780,10 +953,15 @@ class TreeTableSelect extends Component {
         const id = this.props.id;
         const htmlId = 'form_' + id;
 
-        const className = owner.addFormValidationClass('' , id);
+        const className = owner.addFormValidationClass('', id);
 
         return wrapInput(id, htmlId, owner, props.format, '', props.label, props.help,
-            <TreeTable className={className} data={props.data} dataUrl={props.dataUrl} selectMode={TreeSelectMode.SINGLE} selection={owner.getFormValue(id)} onSelectionChangedAsync={::this.onSelectionChangedAsync}/>
+            <TreeTable className={className}
+                       data={props.data}
+                       dataUrl={props.dataUrl}
+                       selectMode={TreeSelectMode.SINGLE}
+                       selection={owner.getFormValue(id)}
+                       onSelectionChangedAsync={::this.onSelectionChangedAsync}/>
         );
     }
 }
@@ -806,6 +984,7 @@ class TableSelect extends Component {
         dataUrl: PropTypes.string,
         data: PropTypes.array,
         columns: PropTypes.array,
+        order: PropTypes.array,
         selectionKeyIndex: PropTypes.number,
         selectionLabelIndex: PropTypes.number,
         selectionAsArray: PropTypes.bool,
@@ -818,6 +997,7 @@ class TableSelect extends Component {
         help: PropTypes.oneOfType([PropTypes.string, PropTypes.object]),
         format: PropTypes.string,
         disabled: PropTypes.bool,
+        withClear: PropTypes.bool,
 
         pageLength: PropTypes.number
     }
@@ -863,6 +1043,15 @@ class TableSelect extends Component {
         });
     }
 
+    async clear() {
+        const owner = this.getFormStateOwner();
+        if (this.props.selectMode === TableSelectMode.SINGLE && !this.props.selectionAsArray) {
+            owner.updateFormValue(this.props.id, null);
+        } else {
+            owner.updateFormValue(this.props.id, []);
+        }
+    }
+
     refresh() {
         this.table.refresh();
     }
@@ -874,21 +1063,41 @@ class TableSelect extends Component {
         const htmlId = 'form_' + id;
         const t = props.t;
 
+        const selection = owner.getFormValue(id);
+
         if (props.dropdown) {
-            const className = owner.addFormValidationClass('form-control' , id);
+            const className = owner.addFormValidationClass('form-control', id);
 
             return wrapInput(id, htmlId, owner, props.format, '', props.label, props.help,
                 <div>
                     <div className={(props.disabled ? '' : 'input-group ') + styles.tableSelectDropdown}>
-                        <input type="text" className={className} value={this.state.selectedLabel} onClick={::this.toggleOpen} readOnly={!props.disabled} disabled={props.disabled}/>
+                        <input type="text"
+                               className={className}
+                               value={this.state.selectedLabel}
+                               onClick={::this.toggleOpen}
+                               readOnly={!props.disabled}
+                               disabled={props.disabled}/>
                         {!props.disabled &&
                         <div className="input-group-append">
                             <Button label={t('select')} className="btn-secondary" onClickAsync={::this.toggleOpen}/>
+                            {props.withClear && selection && <Button icon="times" title={t('Clear')} className="btn-secondary" onClickAsync={::this.clear}/>}
                         </div>
                         }
                     </div>
-                    <div className={styles.tableSelectTable + (this.state.open ? '' : ' ' + styles.tableSelectTableHidden)}>
-                        <Table ref={node => this.table = node} data={props.data} dataUrl={props.dataUrl} columns={props.columns} selectMode={props.selectMode} selectionAsArray={this.props.selectionAsArray} withHeader={props.withHeader} selectionKeyIndex={props.selectionKeyIndex} selection={owner.getFormValue(id)} onSelectionDataAsync={::this.onSelectionDataAsync} onSelectionChangedAsync={::this.onSelectionChangedAsync}/>
+                    <div
+                        className={styles.tableSelectTable + (this.state.open ? '' : ' ' + styles.tableSelectTableHidden)}>
+                        <Table ref={node => this.table = node}
+                               data={props.data}
+                               dataUrl={props.dataUrl}
+                               columns={props.columns}
+                               order={props.order}
+                               selectMode={props.selectMode}
+                               selectionAsArray={this.props.selectionAsArray}
+                               withHeader={props.withHeader}
+                               selectionKeyIndex={props.selectionKeyIndex}
+                               selection={selection}
+                               onSelectionDataAsync={::this.onSelectionDataAsync}
+                               onSelectionChangedAsync={::this.onSelectionChangedAsync}/>
                     </div>
                 </div>
             );
@@ -896,7 +1105,18 @@ class TableSelect extends Component {
             return wrapInput(id, htmlId, owner, props.format, '', props.label, props.help,
                 <div>
                     <div>
-                        <Table ref={node => this.table = node} data={props.data} dataUrl={props.dataUrl} columns={props.columns} pageLength={props.pageLength} selectMode={props.selectMode} selectionAsArray={this.props.selectionAsArray} withHeader={props.withHeader} selectionKeyIndex={props.selectionKeyIndex} selection={owner.getFormValue(id)} onSelectionChangedAsync={::this.onSelectionChangedAsync}/>
+                        <Table ref={node => this.table = node}
+                               data={props.data}
+                               dataUrl={props.dataUrl}
+                               columns={props.columns}
+                               order={props.order}
+                               pageLength={props.pageLength}
+                               selectMode={props.selectMode}
+                               selectionAsArray={this.props.selectionAsArray}
+                               withHeader={props.withHeader}
+                               selectionKeyIndex={props.selectionKeyIndex}
+                               selection={selection}
+                               onSelectionChangedAsync={::this.onSelectionChangedAsync}/>
                     </div>
                 </div>
             );
@@ -943,449 +1163,600 @@ class ACEEditor extends Component {
 }
 
 
-const withForm = createComponentMixin([], [], (TargetClass, InnerClass) => {
-    const proto = InnerClass.prototype;
+const withForm = createComponentMixin({
+    decoratorFn: (TargetClass, InnerClass) => {
+        const proto = InnerClass.prototype;
 
-    const cleanFormState = Immutable.Map({
-        state: FormState.Loading,
-        isValidationShown: false,
-        isDisabled: false,
-        statusMessageText: '',
-        data: Immutable.Map(),
-        isServerValidationRunning: false
-    });
-
-    // formValidateResolve is called by "validateForm" once client receives validation response from server that does not
-    // trigger another server validation
-    let formValidateResolve = null;
-
-    function scheduleValidateForm(self) {
-        setTimeout(() => {
-            self.setState(previousState => ({
-                formState: previousState.formState.withMutations(mutState => {
-                    validateFormState(self, mutState);
-                })
-            }));
-        }, 0);
-    }
-
-    function validateFormState(self, mutState) {
-        const settings = self.state.formSettings;
-
-        if (!mutState.get('isServerValidationRunning') && settings.serverValidation) {
-            const payload = {};
-            let payloadNotEmpty = false;
-
-            for (const attr of settings.serverValidation.extra || []) {
-                if (typeof attr === 'string') {
-                    payload[attr] = mutState.getIn(['data', attr, 'value']);
-                } else {
-                    const data = mutState.get('data').map(attr => attr.get('value')).toJS();
-                    payload[attr.key] = attr.data(data);
-                }
-            }
-
-            for (const attr of settings.serverValidation.changed) {
-                const currValue = mutState.getIn(['data', attr, 'value']);
-                const serverValue = mutState.getIn(['data', attr, 'serverValue']);
-
-                // This really assumes that all form values are preinitialized (i.e. not undef)
-                if (currValue !== serverValue) {
-                    mutState.setIn(['data', attr, 'serverValidated'], false);
-                    payload[attr] = currValue;
-                    payloadNotEmpty = true;
-                }
-            }
-
-            if (payloadNotEmpty) {
-                mutState.set('isServerValidationRunning', true);
-
-                axios.post(getUrl(settings.serverValidation.url), payload)
-                    .then(response => {
-
-                        self.setState(previousState => ({
-                            formState: previousState.formState.withMutations(mutState => {
-                                mutState.set('isServerValidationRunning', false);
-
-                                mutState.update('data', stateData => stateData.withMutations(mutStateData => {
-                                    for (const attr in payload) {
-                                        mutStateData.setIn([attr, 'serverValue'], payload[attr]);
-
-                                        if (payload[attr] === mutState.getIn(['data', attr, 'value'])) {
-                                            mutStateData.setIn([attr, 'serverValidated'], true);
-                                            mutStateData.setIn([attr, 'serverValidation'], response.data[attr] || true);
-                                        }
-                                    }
-                                }));
-                            })
-                        }));
-
-                        scheduleValidateForm(self);
-                    })
-                    .catch(error => {
-                        console.log('Error in "validateFormState": ' + error);
-
-                        self.setState(previousState => ({
-                            formState: previousState.formState.set('isServerValidationRunning', false)
-                        }));
-
-                        // TODO: It might be good not to give up immediatelly, but retry a couple of times
-                        // scheduleValidateForm(self);
-                    });
-            } else {
-                if (formValidateResolve) {
-                    const resolve = formValidateResolve;
-                    formValidateResolve = null;
-                    resolve();
-                }
-            }
-        }
-
-        if (self.localValidateFormValues) {
-            mutState.update('data', stateData => stateData.withMutations(mutStateData => {
-                self.localValidateFormValues(mutStateData);
-            }));
-        }
-    }
-
-    proto.initForm = function(settings) {
-        const state = this.state || {};
-        state.formState = cleanFormState;
-        state.formSettings = settings || {};
-        this.state = state;
-    };
-
-    proto.resetFormState = function() {
-        this.setState({
-            formState: cleanFormState
+        const cleanFormState = Immutable.Map({
+            state: FormState.Loading,
+            isValidationShown: false,
+            isDisabled: false,
+            statusMessageText: '',
+            data: Immutable.Map(),
+            savedData: Immutable.Map(),
+            isServerValidationRunning: false
         });
-    };
 
-    proto.getFormValuesFromEntity = function(entity, mutator) {
-        const data = Object.assign({}, entity);
+        const getSaveData = (self, formStateData) => {
+            let data = formStateData.map(attr => attr.get('value')).toJS();
 
-        data.originalHash = data.hash;
-        delete data.hash;
-
-        if (mutator) {
-            mutator(data);
-        }
-
-        this.populateFormValues(data);
-    };
-
-    proto.getFormValuesFromURL = async function(url, mutator) {
-        setTimeout(() => {
-            this.setState(previousState => {
-                if (previousState.formState.get('state') === FormState.Loading) {
-                    return {
-                        formState: previousState.formState.set('state', FormState.LoadingWithNotice)
-                    };
-                }
-            });
-        }, 500);
-
-        const response = await axios.get(getUrl(url));
-
-        let data = response.data;
-
-        data.originalHash = data.hash;
-        delete data.hash;
-
-        if (mutator) {
-            const newData = mutator(data);
-
-            if (newData !== undefined) {
-                data = newData;
-            }
-        }
-
-        this.populateFormValues(data);
-    };
-
-    proto.validateAndSendFormValuesToURL = async function(method, url, mutator) {
-        await this.waitForFormServerValidated();
-
-        if (this.isFormWithoutErrors()) {
-            let data = this.getFormValues();
-
-            if (mutator) {
-                const newData = mutator(data);
+            if (self.submitFormValuesMutator) {
+                const newData = self.submitFormValuesMutator(data, false);
                 if (newData !== undefined) {
                     data = newData;
                 }
             }
 
-            const response = await axios.method(method, getUrl(url), data);
+            return data;
+        };
 
-            return response.data || true;
+        // formValidateResolve is called by "validateForm" once client receives validation response from server that does not
+        // trigger another server validation
+        let formValidateResolve = null;
 
-        } else {
-            this.showFormValidation();
-            return false;
-        }
-    };
-
-
-    proto.populateFormValues = function(data) {
-        this.setState(previousState => ({
-            formState: previousState.formState.withMutations(mutState => {
-                mutState.set('state', FormState.Ready);
-
-                mutState.update('data', stateData => stateData.withMutations(mutStateData => {
-                    for (const key in data) {
-                        mutStateData.set(key, Immutable.Map({
-                            value: data[key]
-                        }));
-                    }
+        function scheduleValidateForm(self) {
+            setTimeout(() => {
+                self.setState(previousState => ({
+                    formState: previousState.formState.withMutations(mutState => {
+                        validateFormState(self, mutState);
+                    })
                 }));
-
-                validateFormState(this, mutState);
-            })
-        }));
-    };
-
-    proto.waitForFormServerValidated = async function() {
-        if (!this.isFormServerValidated()) {
-            await new Promise(resolve => { formValidateResolve = resolve; });
+            }, 0);
         }
-    };
 
-    proto.scheduleFormRevalidate = function() {
-        scheduleValidateForm(this);
-    };
+        function validateFormState(self, mutState) {
+            const settings = self.state.formSettings;
 
-    proto.updateForm = function(mutator) {
-        this.setState(previousState => {
-            const onChangeBeforeValidationCallback = this.state.formSettings.onChangeBeforeValidation || {};
+            if (!mutState.get('isServerValidationRunning') && settings.serverValidation) {
+                const payload = {};
+                let payloadNotEmpty = false;
 
-            const formState = previousState.formState.withMutations(mutState => {
-                mutState.update('data', stateData => stateData.withMutations(mutStateData => {
-                    mutator(mutStateData);
-
-                    if (typeof onChangeBeforeValidationCallback === 'object') {
-                        for (const key in onChangeBeforeValidationCallback) {
-                            const oldValue = previousState.formState.getIn(['data', key, 'value']);
-                            const newValue = mutStateData.getIn([key, 'value']);
-                            onChangeBeforeValidationCallback[key](mutStateData, key, oldValue, newValue);
-                        }
+                for (const attr of settings.serverValidation.extra || []) {
+                    if (typeof attr === 'string') {
+                        payload[attr] = mutState.getIn(['data', attr, 'value']);
                     } else {
-                        onChangeBeforeValidationCallback(mutStateData);
+                        const data = mutState.get('data').map(attr => attr.get('value')).toJS();
+                        payload[attr.key] = attr.data(data);
                     }
+                }
+
+                for (const attr of settings.serverValidation.changed) {
+                    const currValue = mutState.getIn(['data', attr, 'value']);
+                    const serverValue = mutState.getIn(['data', attr, 'serverValue']);
+
+                    // This really assumes that all form values are preinitialized (i.e. not undef)
+                    if (currValue !== serverValue) {
+                        mutState.setIn(['data', attr, 'serverValidated'], false);
+                        payload[attr] = currValue;
+                        payloadNotEmpty = true;
+                    }
+                }
+
+                if (payloadNotEmpty) {
+                    mutState.set('isServerValidationRunning', true);
+
+                    axios.post(getUrl(settings.serverValidation.url), payload)
+                        .then(response => {
+
+                            if (self.isComponentMounted()) {
+                                self.setState(previousState => ({
+                                    formState: previousState.formState.withMutations(mutState => {
+                                        mutState.set('isServerValidationRunning', false);
+
+                                        mutState.update('data', stateData => stateData.withMutations(mutStateData => {
+                                            for (const attr in payload) {
+                                                mutStateData.setIn([attr, 'serverValue'], payload[attr]);
+
+                                                if (payload[attr] === mutState.getIn(['data', attr, 'value'])) {
+                                                    mutStateData.setIn([attr, 'serverValidated'], true);
+                                                    mutStateData.setIn([attr, 'serverValidation'], response.data[attr] || true);
+                                                }
+                                            }
+                                        }));
+                                    })
+                                }));
+
+                                scheduleValidateForm(self);
+                            }
+                        })
+                        .catch(error => {
+                            if (self.isComponentMounted()) {
+                                console.log('Error in "validateFormState": ' + error);
+
+                                self.setState(previousState => ({
+                                    formState: previousState.formState.set('isServerValidationRunning', false)
+                                }));
+
+                                // TODO: It might be good not to give up immediatelly, but retry a couple of times
+                                // scheduleValidateForm(self);
+                            }
+                        });
+                } else {
+                    if (formValidateResolve) {
+                        const resolve = formValidateResolve;
+                        formValidateResolve = null;
+                        resolve();
+                    }
+                }
+            }
+
+            if (self.localValidateFormValues) {
+                mutState.update('data', stateData => stateData.withMutations(mutStateData => {
+                    self.localValidateFormValues(mutStateData);
                 }));
+            }
+        }
 
-                validateFormState(this, mutState);
-            });
+        const previousComponentDidMount = proto.componentDidMount;
+        proto.componentDidMount = function () {
+            this._isComponentMounted = true;
+            if (previousComponentDidMount) {
+                previousComponentDidMount.apply(this);
+            }
+        };
 
-            let newState = {
-                formState
+        const previousComponentWillUnmount = proto.componentWillUnmount;
+        proto.componentWillUnmount = function () {
+            this._isComponentMounted = false;
+            if (previousComponentWillUnmount) {
+                previousComponentDidMount.apply(this);
+            }
+        };
+
+        proto.isComponentMounted = function () {
+            return !!this._isComponentMounted;
+        }
+
+        proto.initForm = function (settings) {
+            const state = this.state || {};
+            state.formState = cleanFormState;
+            state.formSettings = {
+                leaveConfirmation: true,
+                ...(settings || {})
             };
+            this.state = state;
+        };
+
+        proto.resetFormState = function () {
+            this.setState({
+                formState: cleanFormState
+            });
+        };
+
+        proto.getFormValuesFromEntity = function (entity) {
+            const settings = this.state.formSettings;
+            const data = Object.assign({}, entity);
+
+            data.originalHash = data.hash;
+            delete data.hash;
+
+            if (this.getFormValuesMutator) {
+                this.getFormValuesMutator(data, this.getFormValues());
+            }
+
+            this.populateFormValues(data);
+        };
+
+        proto.getFormValuesFromURL = async function (url) {
+            const settings = this.state.formSettings;
+            setTimeout(() => {
+                this.setState(previousState => {
+                    if (previousState.formState.get('state') === FormState.Loading) {
+                        return {
+                            formState: previousState.formState.set('state', FormState.LoadingWithNotice)
+                        };
+                    }
+                });
+            }, 500);
+
+            const response = await axios.get(getUrl(url));
+
+            let data = response.data;
+
+            data.originalHash = data.hash;
+            delete data.hash;
+
+            if (this.getFormValuesMutator) {
+                const newData = this.getFormValuesMutator(data, this.getFormValues());
+
+                if (newData !== undefined) {
+                    data = newData;
+                }
+            }
+
+            this.populateFormValues(data);
+        };
+
+        proto.validateAndSendFormValuesToURL = async function (method, url) {
+            const settings = this.state.formSettings;
+            await this.waitForFormServerValidated();
+
+            if (this.isFormWithoutErrors()) {
+                if (settings.getPreSubmitUpdater) {
+                    const preSubmitUpdater = await settings.getPreSubmitUpdater();
+
+                    await new Promise((resolve, reject) => {
+                        this.setState(previousState => ({
+                            formState: previousState.formState.withMutations(mutState => {
+                                mutState.update('data', stateData => stateData.withMutations(preSubmitUpdater));
+                            })
+                        }), resolve);
+                    });
+                }
+
+                let data = this.getFormValues();
+
+                if (this.submitFormValuesMutator) {
+                    const newData = this.submitFormValuesMutator(data, true);
+                    if (newData !== undefined) {
+                        data = newData;
+                    }
+                }
+
+                const response = await axios.method(method, getUrl(url), data);
+
+                if (settings.leaveConfirmation) {
+                    await new Promise((resolve, reject) => {
+                        this.setState(previousState => ({
+                            formState: previousState.formState.set('savedData', getSaveData(this, previousState.formState.get('data')))
+                        }), resolve);
+                    });
+                }
+
+                return response.data || true;
+
+            } else {
+                this.showFormValidation();
+                return false;
+            }
+        };
 
 
-            const onChangeCallback = this.state.formSettings.onChange || {};
+        proto.populateFormValues = function (data) {
+            const settings = this.state.formSettings;
 
-            if (typeof onChangeCallback === 'object') {
-                for (const key in onChangeCallback) {
-                    const oldValue = previousState.formState.getIn(['data', key, 'value']);
-                    const newValue = formState.getIn(['data', key, 'value']);
-                    onChangeCallback[key](newState, key, oldValue, newValue);
+            this.setState(previousState => ({
+                formState: previousState.formState.withMutations(mutState => {
+                    mutState.set('state', FormState.Ready);
+
+                    mutState.update('data', stateData => stateData.withMutations(mutStateData => {
+                        for (const key in data) {
+                            mutStateData.set(key, Immutable.Map({
+                                value: data[key]
+                            }));
+                        }
+                    }));
+
+                    if (settings.leaveConfirmation) {
+                        mutState.set('savedData', getSaveData(this, mutState.get('data')));
+                    }
+
+                    validateFormState(this, mutState);
+                })
+            }));
+        };
+
+        proto.waitForFormServerValidated = async function () {
+            if (!this.isFormServerValidated()) {
+                await new Promise(resolve => {
+                    formValidateResolve = resolve;
+                });
+            }
+        };
+
+        proto.scheduleFormRevalidate = function () {
+            scheduleValidateForm(this);
+        };
+
+        proto.updateForm = function (mutator) {
+            this.setState(previousState => {
+                const onChangeBeforeValidationCallback = this.state.formSettings.onChangeBeforeValidation || {};
+
+                const formState = previousState.formState.withMutations(mutState => {
+                    mutState.update('data', stateData => stateData.withMutations(mutStateData => {
+                        mutator(mutStateData);
+
+                        if (typeof onChangeBeforeValidationCallback === 'object') {
+                            for (const key in onChangeBeforeValidationCallback) {
+                                const oldValue = previousState.formState.getIn(['data', key, 'value']);
+                                const newValue = mutStateData.getIn([key, 'value']);
+                                onChangeBeforeValidationCallback[key](mutStateData, key, oldValue, newValue);
+                            }
+                        } else {
+                            onChangeBeforeValidationCallback(mutStateData);
+                        }
+                    }));
+
+                    validateFormState(this, mutState);
+                });
+
+                let newState = {
+                    formState
+                };
+
+
+                const onChangeCallback = this.state.formSettings.onChange || {};
+
+                if (typeof onChangeCallback === 'object') {
+                    for (const key in onChangeCallback) {
+                        const oldValue = previousState.formState.getIn(['data', key, 'value']);
+                        const newValue = formState.getIn(['data', key, 'value']);
+                        onChangeCallback[key](newState, key, oldValue, newValue);
+                    }
+                } else {
+                    onChangeCallback(newState);
+                }
+
+                return newState;
+            });
+        };
+
+        proto.updateFormValue = function (key, value) {
+            this.setState(previousState => {
+                const oldValue = previousState.formState.getIn(['data', key, 'value']);
+
+                const onChangeBeforeValidationCallback = this.state.formSettings.onChangeBeforeValidation || {};
+
+                const formState = previousState.formState.withMutations(mutState => {
+                    mutState.update('data', stateData => stateData.withMutations(mutStateData => {
+                        mutStateData.setIn([key, 'value'], value);
+
+                        if (typeof onChangeBeforeValidationCallback === 'object') {
+                            if (onChangeBeforeValidationCallback[key]) {
+                                onChangeBeforeValidationCallback[key](mutStateData, key, oldValue, value);
+                            }
+                        } else {
+                            onChangeBeforeValidationCallback(mutStateData, key, oldValue, value);
+                        }
+                    }));
+
+                    validateFormState(this, mutState);
+                });
+
+                let newState = {
+                    formState
+                };
+
+
+                const onChangeCallback = this.state.formSettings.onChange || {};
+
+                if (typeof onChangeCallback === 'object') {
+                    if (onChangeCallback[key]) {
+                        onChangeCallback[key](newState, key, oldValue, value);
+                    }
+                } else {
+                    onChangeCallback(newState, key, oldValue, value);
+                }
+
+                return newState;
+            });
+        };
+
+        proto.getFormValue = function (name) {
+            return this.state.formState.getIn(['data', name, 'value']);
+        };
+
+        proto.getFormValues = function (name) {
+            if (!this.state || !this.state.formState) return undefined;
+            return this.state.formState.get('data').map(attr => attr.get('value')).toJS();
+        };
+
+        proto.getFormError = function (name) {
+            return this.state.formState.getIn(['data', name, 'error']);
+        };
+
+        proto.isFormWithLoadingNotice = function () {
+            return this.state.formState.get('state') === FormState.LoadingWithNotice;
+        };
+
+        proto.isFormLoading = function () {
+            return this.state.formState.get('state') === FormState.Loading || this.state.formState.get('state') === FormState.LoadingWithNotice;
+        };
+
+        proto.isFormReady = function () {
+            return this.state.formState.get('state') === FormState.Ready;
+        };
+
+        const _isFormChanged = self => {
+            const currentData = getSaveData(self, self.state.formState.get('data'));
+            const savedData = self.state.formState.get('savedData');
+
+            function isDifferent(data1, data2, prefix) {
+                if (typeof data1 === 'object' && typeof data2 === 'object' && data1 && data2) {
+                    const keys = new Set([...Object.keys(data1), ...Object.keys(data2)]);
+                    for (const key of keys) {
+                        if (isDifferent(data1[key], data2[key], `${prefix}/${key}`)) {
+                            return true;
+                        }
+                    }
+                } else if (data1 !== data2) {
+                    // console.log(prefix);
+                    return true;
+                }
+                return false;
+            }
+
+            const result = isDifferent(currentData, savedData, '');
+
+            return result;
+        };
+
+        proto.isFormChanged = function () {
+            const settings = this.state.formSettings;
+
+            if (!settings.leaveConfirmation) return false;
+
+            if (settings.getPreSubmitUpdater) {
+                // getPreSubmitUpdater is an async function. We cannot do anything async here. So to be on the safe side,
+                // we simply assume that the form has been changed.
+                return true;
+            }
+
+            return _isFormChanged(this);
+        };
+
+        proto.isFormChangedAsync = async function () {
+            const settings = this.state.formSettings;
+
+            if (!settings.leaveConfirmation) return false;
+
+            if (settings.getPreSubmitUpdater) {
+                const preSubmitUpdater = await settings.getPreSubmitUpdater();
+
+                await new Promise((resolve, reject) => {
+                    this.setState(previousState => ({
+                        formState: previousState.formState.withMutations(mutState => {
+                            mutState.update('data', stateData => stateData.withMutations(preSubmitUpdater));
+                        })
+                    }), resolve);
+                });
+            }
+
+            return _isFormChanged(this);
+
+        };
+
+        proto.isFormValidationShown = function () {
+            return this.state.formState.get('isValidationShown');
+        };
+
+        proto.addFormValidationClass = function (className, name) {
+            if (this.isFormValidationShown()) {
+                const error = this.getFormError(name);
+                if (error) {
+                    return className + ' is-invalid';
+                } else {
+                    return className + ' is-valid';
                 }
             } else {
-                onChangeCallback(newState);
+                return className;
             }
+        };
 
-            return newState;
-        });
-    };
+        proto.getFormValidationMessage = function (name) {
+            if (this.isFormValidationShown()) {
+                return this.getFormError(name);
+            } else {
+                return '';
+            }
+        };
 
-    proto.updateFormValue = function(key, value) {
-        this.setState(previousState => {
-            const oldValue = previousState.formState.getIn(['data', key, 'value']);
+        proto.showFormValidation = function () {
+            this.setState(previousState => ({formState: previousState.formState.set('isValidationShown', true)}));
+        };
 
-            const onChangeBeforeValidationCallback = this.state.formSettings.onChangeBeforeValidation || {};
+        proto.hideFormValidation = function () {
+            this.setState(previousState => ({formState: previousState.formState.set('isValidationShown', false)}));
+        };
 
-            const formState = previousState.formState.withMutations(mutState => {
-                mutState.update('data', stateData => stateData.withMutations(mutStateData => {
-                    mutStateData.setIn([key, 'value'], value);
+        proto.isFormWithoutErrors = function () {
+            return !this.state.formState.get('data').find(attr => attr.get('error'));
+        };
 
-                    if (typeof onChangeBeforeValidationCallback === 'object') {
-                        if (onChangeBeforeValidationCallback[key]) {
-                            onChangeBeforeValidationCallback[key](mutStateData, key, oldValue, value);
-                        }
-                    } else {
-                        onChangeBeforeValidationCallback(mutStateData, key, oldValue, value);
-                    }
-                }));
+        proto.isFormServerValidated = function () {
+            return !this.state.formSettings.serverValidation || this.state.formSettings.serverValidation.changed.every(attr => this.state.formState.getIn(['data', attr, 'serverValidated']));
+        };
 
-                validateFormState(this, mutState);
-            });
+        proto.getFormStatusMessageText = function () {
+            return this.state.formState.get('statusMessageText');
+        };
 
-            let newState = {
-                formState
-            };
+        proto.getFormStatusMessageSeverity = function () {
+            return this.state.formState.get('statusMessageSeverity');
+        };
 
+        proto.setFormStatusMessage = function (severity, text) {
+            this.setState(previousState => ({
+                formState: previousState.formState.withMutations(map => {
+                    map.set('statusMessageText', text);
+                    map.set('statusMessageSeverity', severity);
+                })
+            }));
+        };
 
-            const onChangeCallback = this.state.formSettings.onChange || {};
+        proto.clearFormStatusMessage = function () {
+            this.setState(previousState => ({
+                formState: previousState.formState.withMutations(map => {
+                    map.set('statusMessageText', '');
+                })
+            }));
+        };
 
-            if (typeof onChangeCallback === 'object') {
-                if (onChangeCallback[key]) {
-                    onChangeCallback[key](newState, key, oldValue, value);
+        proto.enableForm = function () {
+            this.setState(previousState => ({formState: previousState.formState.set('isDisabled', false)}));
+        };
+
+        proto.disableForm = function () {
+            this.setState(previousState => ({formState: previousState.formState.set('isDisabled', true)}));
+        };
+
+        proto.isFormDisabled = function () {
+            return this.state.formState.get('isDisabled');
+        };
+
+        proto.formHandleErrors = async function (fn) {
+            const t = this.props.t;
+            try {
+                await fn();
+            } catch (error) {
+                if (error instanceof interoperableErrors.ChangedError) {
+                    this.disableForm();
+                    this.setFormStatusMessage('danger',
+                        <span>
+                            <strong>{t('yourUpdatesCannotBeSaved')}</strong>{' '}
+                            {t('someoneElseHasIntroducedModificationIn')}
+                        </span>
+                    );
+                    return;
                 }
-            } else {
-                onChangeCallback(newState, key, oldValue, value);
+
+                if (error instanceof interoperableErrors.NamespaceNotFoundError) {
+                    this.disableForm();
+                    this.setFormStatusMessage('danger',
+                        <span>
+                            <strong>{t('yourUpdatesCannotBeSaved')}</strong>{' '}
+                            {t('itSeemsThatSomeoneElseHasDeletedThe')}
+                        </span>
+                    );
+                    return;
+                }
+
+                if (error instanceof interoperableErrors.NotFoundError) {
+                    this.disableForm();
+                    this.setFormStatusMessage('danger',
+                        <span>
+                            <strong>{t('yourUpdatesCannotBeSaved')}</strong>{' '}
+                            {t('itSeemsThatSomeoneElseHasDeletedThe-1')}
+                        </span>
+                    );
+                    return;
+                }
+
+                throw error;
             }
+        };
 
-            return newState;
-        });
-    };
-
-    proto.getFormValue = function(name) {
-        return this.state.formState.getIn(['data', name, 'value']);
-    };
-
-    proto.getFormValues = function(name) {
-        return this.state.formState.get('data').map(attr => attr.get('value')).toJS();
-    };
-
-    proto.getFormError = function(name) {
-        return this.state.formState.getIn(['data', name, 'error']);
-    };
-
-    proto.isFormWithLoadingNotice = function() {
-        return this.state.formState.get('state') === FormState.LoadingWithNotice;
-    };
-
-    proto.isFormLoading = function() {
-        return this.state.formState.get('state') === FormState.Loading || this.state.formState.get('state') === FormState.LoadingWithNotice;
-    };
-
-    proto.isFormReady = function() {
-        return this.state.formState.get('state') === FormState.Ready;
-    };
-
-    proto.isFormValidationShown = function() {
-        return this.state.formState.get('isValidationShown');
-    };
-
-    proto.addFormValidationClass = function(className, name) {
-        if (this.isFormValidationShown()) {
-            const error = this.getFormError(name);
-            if (error) {
-                return className + ' is-invalid';
-            } else {
-                return className + ' is-valid';
-            }
-        } else {
-            return className;
-        }
-    };
-
-    proto.getFormValidationMessage = function(name) {
-        if (this.isFormValidationShown()) {
-            return this.getFormError(name);
-        } else {
-            return '';
-        }
-    };
-
-    proto.showFormValidation = function() {
-        this.setState(previousState => ({formState: previousState.formState.set('isValidationShown', true)}));
-    };
-
-    proto.hideFormValidation = function() {
-        this.setState(previousState => ({formState: previousState.formState.set('isValidationShown', false)}));
-    };
-
-    proto.isFormWithoutErrors = function() {
-        return !this.state.formState.get('data').find(attr => attr.get('error'));
-    };
-
-    proto.isFormServerValidated = function() {
-        return !this.state.formSettings.serverValidation || this.state.formSettings.serverValidation.changed.every(attr => this.state.formState.getIn(['data', attr, 'serverValidated']));
-    };
-
-    proto.getFormStatusMessageText = function() {
-        return this.state.formState.get('statusMessageText');
-    };
-
-    proto.getFormStatusMessageSeverity = function() {
-        return this.state.formState.get('statusMessageSeverity');
-    };
-
-    proto.setFormStatusMessage = function(severity, text) {
-        this.setState(previousState => ({
-            formState: previousState.formState.withMutations(map => {
-                map.set('statusMessageText', text);
-                map.set('statusMessageSeverity', severity);
-            })
-        }));
-    };
-
-    proto.clearFormStatusMessage = function() {
-        this.setState(previousState => ({
-            formState: previousState.formState.withMutations(map => {
-                map.set('statusMessageText', '');
-            })
-        }));
-    };
-
-    proto.enableForm = function() {
-        this.setState(previousState => ({formState: previousState.formState.set('isDisabled', false)}));
-    };
-
-    proto.disableForm = function() {
-        this.setState(previousState => ({formState: previousState.formState.set('isDisabled', true)}));
-    };
-
-    proto.isFormDisabled = function() {
-        return this.state.formState.get('isDisabled');
-    };
-
-    proto.formHandleChangedError = async function(fn) {
-        const t = this.props.t;
-        try {
-            await fn();
-        } catch (error) {
-            if (error instanceof interoperableErrors.ChangedError) {
-                this.disableForm();
-                this.setFormStatusMessage('danger',
-                    <span>
-                        <strong>{t('yourUpdatesCannotBeSaved')}</strong>{' '}
-                        {t('someoneElseHasIntroducedModificationIn')}
-                    </span>
-                );
-                return;
-            }
-
-            if (error instanceof interoperableErrors.NamespaceNotFoundError) {
-                this.disableForm();
-                this.setFormStatusMessage('danger',
-                    <span>
-                        <strong>{t('yourUpdatesCannotBeSaved')}</strong>{' '}
-                        {t('itSeemsThatSomeoneElseHasDeletedThe')}
-                    </span>
-                );
-                return;
-            }
-
-            if (error instanceof interoperableErrors.NotFoundError) {
-                this.disableForm();
-                this.setFormStatusMessage('danger',
-                    <span>
-                        <strong>{t('yourUpdatesCannotBeSaved')}</strong>{' '}
-                        {t('itSeemsThatSomeoneElseHasDeletedThe-1')}
-                    </span>
-                );
-                return;
-            }
-
-            throw error;
-        }
-    };
-
-    return {};
+        return {};
+    }
 });
 
+function filterData(obj, allowedKeys) {
+    const result = {};
+    for (const key in obj) {
+        if (key === 'originalHash') {
+            result[key] = obj[key];
+        } else {
+            for (const allowedKey of allowedKeys) {
+                if ((typeof allowedKey === 'function' && allowedKey(key)) || allowedKey === key) {
+                    result[key] = obj[key];
+                    break;
+                }
+            }
+        }
+    }
+
+    return result;
+}
 
 export {
     withForm,
@@ -1407,5 +1778,6 @@ export {
     TableSelect,
     TableSelectMode,
     ACEEditor,
-    FormSendMethod
+    FormSendMethod,
+    filterData
 }

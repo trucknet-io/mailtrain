@@ -1,40 +1,30 @@
 'use strict';
 
 import React, {Component} from 'react';
-import PropTypes
-    from 'prop-types';
+import PropTypes from 'prop-types';
 import {Trans} from 'react-i18next';
 import {withTranslation} from '../lib/i18n';
-import {
-    LinkButton,
-    requiresAuthenticatedUser,
-    Title,
-    withPageHelpers
-} from '../lib/page';
+import {LinkButton, requiresAuthenticatedUser, Title, withPageHelpers} from '../lib/page';
 import {
     Button,
     ButtonRow,
     CheckBox,
     Dropdown,
+    filterData,
     Form,
     FormSendMethod,
     InputField,
     StaticField,
     TableSelect,
     TextArea,
-    withForm
+    withForm,
+    withFormErrorHandlers
 } from '../lib/form';
 import {withErrorHandling} from '../lib/error-handling';
 import {DeleteModalDialog} from '../lib/modals';
-import {
-    NamespaceSelect,
-    validateNamespace
-} from '../lib/namespace';
-import {UnsubscriptionMode, FieldWizard} from '../../../shared/lists';
-import styles
-    from "../lib/styles.scss";
-import mailtrainConfig
-    from 'mailtrainConfig';
+import {getDefaultNamespace, NamespaceSelect, validateNamespace} from '../lib/namespace';
+import {FieldWizard, UnsubscriptionMode} from '../../../shared/lists';
+import styles from "../lib/styles.scss";
 import {getMailerTypes} from "../send-configurations/helpers";
 import {withComponentMixins} from "../lib/decorator-helpers";
 
@@ -58,7 +48,8 @@ export default class CUD extends Component {
 
     static propTypes = {
         action: PropTypes.string.isRequired,
-        entity: PropTypes.object
+        entity: PropTypes.object,
+        permissions: PropTypes.object
     }
 
     getFormValuesMutator(data) {
@@ -66,21 +57,36 @@ export default class CUD extends Component {
         data.listunsubscribe_disabled = !!data.listunsubscribe_disabled;
     }
 
+    submitFormValuesMutator(data) {
+        if (data.form === 'default') {
+            data.default_form = null;
+        }
+
+        if (data.fieldWizard === FieldWizard.FIRST_LAST_NAME || data.fieldWizard === FieldWizard.NAME) {
+            data.to_name = null;
+        }
+
+        return filterData(data, ['name', 'description', 'default_form', 'public_subscribe', 'unsubscription_mode',
+            'contact_email', 'homepage', 'namespace', 'to_name', 'listunsubscribe_disabled', 'send_configuration',
+            'fieldWizard'
+        ]);
+    }
+
     componentDidMount() {
         if (this.props.entity) {
-            this.getFormValuesFromEntity(this.props.entity, ::this.getFormValuesMutator);
+            this.getFormValuesFromEntity(this.props.entity);
 
         } else {
             this.populateFormValues({
                 name: '',
                 description: '',
                 form: 'default',
-                default_form: null,
+                default_form: 'default',
                 public_subscribe: true,
                 contact_email: '',
                 homepage: '',
                 unsubscription_mode: UnsubscriptionMode.ONE_STEP,
-                namespace: mailtrainConfig.user.namespace,
+                namespace: getDefaultNamespace(this.props.permissions),
                 to_name: '',
                 fieldWizard: FieldWizard.FIRST_LAST_NAME,
                 send_configuration: null,
@@ -113,6 +119,7 @@ export default class CUD extends Component {
         validateNamespace(t, state);
     }
 
+    @withFormErrorHandlers
     async submitHandler(submitAndLeave) {
         const t = this.props.t;
 
@@ -128,31 +135,22 @@ export default class CUD extends Component {
         this.disableForm();
         this.setFormStatusMessage('info', t('saving'));
 
-        const submitResult = await this.validateAndSendFormValuesToURL(sendMethod, url, data => {
-            if (data.form === 'default') {
-                data.default_form = null;
-            }
-            delete data.form;
-
-            if (data.fieldWizard === FieldWizard.FIRST_LAST_NAME || data.fieldWizard === FieldWizard.NAME) {
-                data.to_name = null;
-            }
-        });
+        const submitResult = await this.validateAndSendFormValuesToURL(sendMethod, url);
 
         if (submitResult) {
             if (this.props.entity) {
                 if (submitAndLeave) {
-                    this.navigateToWithFlashMessage('/lists', 'success', t('List updated'));
+                    this.navigateToWithFlashMessage('/lists', 'success', t('listUpdated'));
                 } else {
-                    await this.getFormValuesFromURL(`rest/lists/${this.props.entity.id}`, ::this.getFormValuesMutator);
+                    await this.getFormValuesFromURL(`rest/lists/${this.props.entity.id}`);
                     this.enableForm();
-                    this.setFormStatusMessage('success', t('List updated'));
+                    this.setFormStatusMessage('success', t('listUpdated'));
                 }
             } else {
                 if (submitAndLeave) {
-                    this.navigateToWithFlashMessage('/lists', 'success', t('List created'));
+                    this.navigateToWithFlashMessage('/lists', 'success', t('listCreated'));
                 } else {
-                    this.navigateToWithFlashMessage(`/lists/${submitResult}/edit`, 'success', t('List created'));
+                    this.navigateToWithFlashMessage(`/lists/${submitResult}/edit`, 'success', t('listCreated'));
                 }
             }
         } else {
@@ -220,14 +218,14 @@ export default class CUD extends Component {
             toNameFields = <InputField id="to_name" label={t('recipientsNameTemplate')} help={t('specifyUsingMergeTagsOfThisListHowTo')}/>;
         } else {
             const fieldWizardOptions = [
-                {key: FieldWizard.NONE, label: t('Empty / Custom (no fields)')},
-                {key: FieldWizard.NAME, label: t('Name (one field)')},
-                {key: FieldWizard.FIRST_LAST_NAME, label: t('First name and Last name (two fields)')},
+                {key: FieldWizard.NONE, label: t('emptyCustomNoFields')},
+                {key: FieldWizard.NAME, label: t('nameOneField')},
+                {key: FieldWizard.FIRST_LAST_NAME, label: t('firstNameAndLastNameTwoFields')},
             ];
 
             const fieldWizardValue = this.getFormValue('fieldWizard');
 
-            const fieldWizardSelector = <Dropdown id="fieldWizard" label={t('Representation of subscriber\'s name')} options={fieldWizardOptions} help={t('Select how the name of a subscriber will be represented. The fields in list will be created accordingly. You can always adjust the choice later by editing the list fields. If you select "Empty / Custom", provide a template below in "Recipients name template" that will be used as subscriber\'s name as it will appear in the emails\' "To" field.')}/>
+            const fieldWizardSelector = <Dropdown id="fieldWizard" label={t('representationOfSubscribersName')} options={fieldWizardOptions} help={t('selectHowTheNameOfASubscriberWillBe')}/>
 
             if (fieldWizardValue === FieldWizard.NONE) {
                 toNameFields = (
@@ -287,8 +285,8 @@ export default class CUD extends Component {
                     <CheckBox id="listunsubscribe_disabled" label={t('unsubscribeHeader')} text={t('doNotSendListUnsubscribeHeaders')}/>
 
                     <ButtonRow>
-                        <Button type="submit" className="btn-primary" icon="check" label={t('Save')}/>
-                        <Button type="submit" className="btn-primary" icon="check" label={t('Save and leave')} onClickAsync={async () => this.submitHandler(true)}/>
+                        <Button type="submit" className="btn-primary" icon="check" label={t('save')}/>
+                        <Button type="submit" className="btn-primary" icon="check" label={t('saveAndLeave')} onClickAsync={async () => await this.submitHandler(true)}/>
                         {canDelete && <LinkButton className="btn-danger" icon="trash-alt" label={t('delete')} to={`/lists/${this.props.entity.id}/delete`}/>}
                     </ButtonRow>
                 </Form>

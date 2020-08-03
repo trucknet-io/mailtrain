@@ -2,7 +2,7 @@
 
 import htmlparser from 'htmlparser2'
 import min from 'lodash/min';
-import mjml, {MJML, BodyComponent, HeadComponent} from "../../lib/mjml";
+import {BodyComponent, HeadComponent, MJML} from "../../lib/mjml";
 import shortid from "shortid";
 
 function getId() {
@@ -26,7 +26,7 @@ function getParent() {
 }
 
 
-function handleMosaicoEditable(block, src) {
+function handleMosaicoAttributes(block, src) {
     let newSrc = src;
     let offset = 0;
 
@@ -43,13 +43,15 @@ function handleMosaicoEditable(block, src) {
 
                 let newFragment = tagStr;
 
-
                 for (const attrMatch of attrsMatches) {
                     if (attrMatch[1] === 'mj-mosaico-editable') {
                         const propertyId = attrMatch[2];
                         block.addMosaicoProperty(propertyId);
-
                         newFragment += ` data-ko-editable="${propertyId}"`;
+                    } else if (attrMatch[1] === 'mj-mosaico-display') {
+                            const propertyId = attrMatch[2];
+                            block.addMosaicoProperty(propertyId);
+                            newFragment += ` data-ko-display="${propertyId}"`;
                     } else {
                         newFragment += ` ${attrMatch[0]}`;
                     }
@@ -75,40 +77,130 @@ function handleMosaicoEditable(block, src) {
 
 
 class MjMosaicoProperty extends HeadComponent {
-    static endingTag = true
+    static endingTag = true;
 
     static allowedAttributes = {
         'property-id': 'string',
         label: 'string',
-        type: 'enum(image,link)'
-    }
+        options: 'string',
+        values: 'string',
+        type: 'enum(image,link,visible,properties,select)'
+    };
 
     handler() {
         const { add } = this.context;
 
-        let properties = null;
+        let extra = '';
 
         const type = this.getAttribute('type');
         if (type === 'image') {
-            properties = 'src url alt';
+            extra = `${extra} properties: src url alt;`;
         } else if (type === 'link') {
-            properties = 'text url';
+            extra = `${extra} properties: text url;`;
+        } else if (type === 'visible') {
+            extra = `${extra} extend: visible;`;
+        } else if (type === 'properties') {
+            extra = `${extra} properties: ${this.getAttribute('values')};`;
+        } else if (type === 'select') {
+            extra = `${extra} widget: select; options: ${this.getAttribute('options')};`;
         }
 
-        const propertiesStr = properties ? ` properties: ${properties}` : '';
-
-        add('style', ` @supports -ko-blockdefs { ${this.getAttribute('property-id')} { label: ${this.getAttribute('label')};${propertiesStr} } }`);
+        add('style', ` @supports -ko-blockdefs { ${this.getAttribute('property-id')} { label: ${this.getAttribute('label')};${extra} } }`);
     }
 }
 
 
 class MjMosaicoContainer extends BodyComponent {
-    static endingTag = false
+    static endingTag = false;
 
     render() {
         return `
             <div data-ko-container="main" data-ko-wrap="false">
                 ${this.renderChildren()}
+            </div>
+        `;
+    }
+}
+
+class MjMosaicoConditionalDisplay extends BodyComponent {
+    constructor(initialDatas = {}) {
+        super(initialDatas);
+
+        const propertyId = this.getAttribute('property-id');
+        this.propertyId = propertyId || `display_${getId()}`;
+
+        const parentBlock = getParent();
+        if (parentBlock) {
+            parentBlock.addMosaicoProperty(this.propertyId);
+        }
+    }
+
+    componentHeadStyle = breakpoint => {
+        const label = this.getAttribute('label');
+        if (label) {
+            return `
+                @supports -ko-blockdefs {
+                    ${this.propertyId} { label: ${label}; extend: visible } 
+                }
+            `;
+        } else {
+            return '';
+        }
+    };
+
+    static endingTag = false;
+
+    static allowedAttributes = {
+        'property-id': 'string',
+        'label': 'string'
+    };
+
+    render() {
+        const { children } = this.props;
+        return `
+            <div
+                ${this.htmlAttributes({
+                    "data-ko-display": this.propertyId,
+                    class: this.getAttribute('css-class'),
+                    'data-ko-block': this.blockId
+                })}
+            >
+                <table
+                    ${this.htmlAttributes({
+                        border: '0',
+                        cellpadding: '0',
+                        cellspacing: '0',
+                        role: 'presentation',
+                        style: 'table',
+                        width: '100%',
+                    })}
+                >
+                    ${this.renderChildren(children, {
+                        renderer: component => component.constructor.isRawElement() ? component.render() : `
+                            <tr>
+                                <td
+                                    ${component.htmlAttributes({
+                                        align: component.getAttribute('align'),
+                                        'vertical-align': component.getAttribute('vertical-align'),
+                                        class: component.getAttribute('css-class'),
+                                        style: {
+                                            background: component.getAttribute('container-background-color'),
+                                            'font-size': '0px',
+                                            padding: component.getAttribute('padding'),
+                                            'padding-top': component.getAttribute('padding-top'),
+                                            'padding-right': component.getAttribute('padding-right'),
+                                            'padding-bottom': component.getAttribute('padding-bottom'),
+                                            'padding-left': component.getAttribute('padding-left'),
+                                            'word-break': 'break-word',
+                                        },
+                                    })}
+                                >
+                                    ${component.render()}
+                                </td>
+                            </tr>
+                        `
+                    })}
+                </table>                        
             </div>
         `;
     }
@@ -132,14 +224,14 @@ class MjMosaicoBlock extends BodyComponent {
                 ${this.blockId} { label: ${this.getAttribute('label')}${propertiesOut} } 
             }
         `;
-    }
+    };
 
-    static endingTag = false
+    static endingTag = false;
 
     static allowedAttributes = {
         'block-id': 'string',
         'label': 'string'
-    }
+    };
 
     addMosaicoProperty(property) {
         this.mosaicoProperties.push(property);
@@ -159,7 +251,7 @@ class MjMosaicoBlock extends BodyComponent {
         `;
         popParent();
 
-        return handleMosaicoEditable(this, result);
+        return handleMosaicoAttributes(this, result);
     }
 }
 
@@ -181,14 +273,14 @@ class MjMosaicoInnerBlock extends BodyComponent {
                 ${this.blockId} { label: ${this.getAttribute('label')}${propertiesOut} } 
             }
         `;
-    }
+    };
 
-    static endingTag = false
+    static endingTag = false;
 
     static allowedAttributes = {
         'block-id': 'string',
         'label': 'string'
-    }
+    };
 
     addMosaicoProperty(property) {
         this.mosaicoProperties.push(property);
@@ -238,14 +330,14 @@ class MjMosaicoInnerBlock extends BodyComponent {
                                     ${component.render()}
                                 </td>
                             </tr>
-                        `,
+                        `
                     })}
                 </table>                        
             </div>
         `;
         popParent();
 
-        return handleMosaicoEditable(this, result);
+        return handleMosaicoAttributes(this, result);
     }
 }
 
@@ -264,7 +356,7 @@ class MjMosaicoImage extends BodyComponent {
         }
     }
 
-    static tagOmission = true
+    static tagOmission = true;
 
     static allowedAttributes = {
         'property-id': 'string',
@@ -292,7 +384,7 @@ class MjMosaicoImage extends BodyComponent {
         target: 'string',
         width: 'unit(px)',
         height: 'unit(px)',
-    }
+    };
 
     static defaultAttributes = {
         align: 'center',
@@ -302,7 +394,7 @@ class MjMosaicoImage extends BodyComponent {
         target: '_blank',
         'placeholder-height': '400',
         'href-editable': false
-    }
+    };
 
     getStyles() {
         const width = this.getContentWidth();
@@ -453,7 +545,7 @@ class MjMosaicoButton extends BodyComponent {
         }
     }
 
-    static endingTag = true
+    static endingTag = true;
 
     static allowedAttributes = {
         'property-id': 'string',
@@ -487,7 +579,7 @@ class MjMosaicoButton extends BodyComponent {
         'vertical-align': 'enum(top,bottom,middle)',
         'text-align': 'enum(left,right,center)',
         width: 'unit(px,%)',
-    }
+    };
 
     static defaultAttributes = {
         align: 'center',
@@ -505,7 +597,7 @@ class MjMosaicoButton extends BodyComponent {
         'text-decoration': 'none',
         'text-transform': 'none',
         'vertical-align': 'middle',
-    }
+    };
 
     getStyles() {
         return {
@@ -591,6 +683,7 @@ class MjMosaicoButton extends BodyComponent {
 const mjmlInstance = new MJML();
 
 mjmlInstance.registerComponent(MjMosaicoContainer);
+mjmlInstance.registerComponent(MjMosaicoConditionalDisplay);
 mjmlInstance.registerComponent(MjMosaicoBlock);
 mjmlInstance.registerComponent(MjMosaicoInnerBlock);
 mjmlInstance.registerComponent(MjMosaicoImage);
@@ -601,8 +694,13 @@ mjmlInstance.registerDependencies({
     'mj-mosaico-container': ['mj-mosaico-block', 'mj-mosaico-inner-block'],
     'mj-body': ['mj-mosaico-container', 'mj-mosaico-block'],
     'mj-section': ['mj-mosaico-container', 'mj-mosaico-block'],
-    'mj-column': ['mj-mosaico-container', 'mj-mosaico-inner-block', 'mj-mosaico-image', 'mj-mosaico-button'],
+    'mj-column': ['mj-mosaico-container', 'mj-mosaico-inner-block', 'mj-mosaico-image', 'mj-mosaico-button', 'mj-mosaico-conditional-display'],
     'mj-mosaico-block': ['mj-section', 'mj-column'],
+    'mj-mosaico-conditional-display': [
+        'mj-mosaico-image', 'mj-mosaico-button',
+        'mj-accordion', 'mj-button', 'mj-carousel', 'mj-divider', 'mj-html', 'mj-image', 'mj-invoice', 'mj-list',
+        'mj-location', 'mj-raw', 'mj-social', 'mj-spacer', 'mj-table', 'mj-text', 'mj-navbar'
+    ],
     'mj-mosaico-inner-block': [
         'mj-mosaico-image', 'mj-mosaico-button',
         'mj-accordion', 'mj-button', 'mj-carousel', 'mj-divider', 'mj-html', 'mj-image', 'mj-invoice', 'mj-list',
@@ -614,6 +712,8 @@ mjmlInstance.registerDependencies({
 mjmlInstance.addToHeader(`
     <style type="text/css">
         @supports -ko-blockdefs {
+            visible { label: Visible?; widget: boolean }
+            color { label: Color; widget: color }
             text { label: Paragraph; widget: text }
             image { label: Image; properties: src url alt }
             link { label: Link; properties: text url }

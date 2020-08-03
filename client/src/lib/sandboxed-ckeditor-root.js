@@ -3,30 +3,15 @@
 import './public-path';
 
 import React, {Component} from 'react';
-import ReactDOM
-    from 'react-dom';
-import {I18nextProvider} from 'react-i18next';
-import i18n, {withTranslation} from './i18n';
-import {
-    parentRPC,
-    UntrustedContentRoot
-} from './untrusted';
-import PropTypes
-    from "prop-types";
-import styles
-    from "./sandboxed-ckeditor.scss";
-import {
-    getPublicUrl,
-    getSandboxUrl,
-    getTrustedUrl
-} from "./urls";
-import {
-    base,
-    unbase
-} from "../../../shared/templates";
+import ReactDOM from 'react-dom';
+import {TranslationRoot, withTranslation} from './i18n';
+import {parentRPC, UntrustedContentRoot} from './untrusted';
+import PropTypes from "prop-types";
+import styles from "./sandboxed-ckeditor.scss";
+import {getPublicUrl, getSandboxUrl, getTrustedUrl} from "./urls";
+import {base, unbase} from "../../../shared/templates";
 
-import CKEditor
-    from "react-ckeditor-component";
+import CKEditor from "react-ckeditor-component";
 
 import {initialHeight} from "./sandboxed-ckeditor-shared";
 import {withComponentMixins} from "./decorator-helpers";
@@ -42,7 +27,7 @@ class CKEditorSandbox extends Component {
         const trustedUrlBase = getTrustedUrl();
         const sandboxUrlBase = getSandboxUrl();
         const publicUrlBase = getPublicUrl();
-        const source = this.props.initialSource && base(this.props.initialSource, trustedUrlBase, sandboxUrlBase, publicUrlBase);
+        const source = this.props.initialSource && base(this.props.initialSource, this.props.tagLanguage, trustedUrlBase, sandboxUrlBase, publicUrlBase);
 
         this.state = {
             source
@@ -52,6 +37,7 @@ class CKEditorSandbox extends Component {
     static propTypes = {
         entityTypeId: PropTypes.string,
         entityId: PropTypes.number,
+        tagLanguage: PropTypes.string,
         initialSource: PropTypes.string
     }
 
@@ -63,7 +49,7 @@ class CKEditorSandbox extends Component {
         const preHtml = '<!doctype html><html><head><meta charset="utf-8"><title></title></head><body>';
         const postHtml = '</body></html>';
 
-        const unbasedSource = unbase(this.state.source, trustedUrlBase, sandboxUrlBase, publicUrlBase, true);
+        const unbasedSource = unbase(this.state.source, this.props.tagLanguage, trustedUrlBase, sandboxUrlBase, publicUrlBase, true);
 
         return {
             source: unbasedSource,
@@ -140,9 +126,9 @@ export default function() {
     parentRPC.init();
 
     ReactDOM.render(
-        <I18nextProvider i18n={ i18n }>
+        <TranslationRoot>
             <UntrustedContentRoot render={props => <CKEditorSandbox {...props} />} />
-        </I18nextProvider>,
+        </TranslationRoot>,
         document.getElementById('root')
     );
 };

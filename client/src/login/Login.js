@@ -2,10 +2,7 @@
 
 import React, {Component} from 'react';
 import {withTranslation} from '../lib/i18n';
-import {
-    Title,
-    withPageHelpers
-} from '../lib/page'
+import {Title, withPageHelpers} from '../lib/page'
 import {Link} from 'react-router-dom'
 import {
     Button,
@@ -14,15 +11,13 @@ import {
     Form,
     FormSendMethod,
     InputField,
-    withForm
+    withForm,
+    withFormErrorHandlers
 } from '../lib/form';
 import {withErrorHandling} from '../lib/error-handling';
-import qs
-    from 'querystringify';
-import interoperableErrors
-    from '../../../shared/interoperable-errors';
-import mailtrainConfig
-    from 'mailtrainConfig';
+import qs from 'querystringify';
+import interoperableErrors from '../../../shared/interoperable-errors';
+import mailtrainConfig from 'mailtrainConfig';
 import {getUrl} from "../lib/urls";
 import {withComponentMixins} from "../lib/decorator-helpers";
 
@@ -38,7 +33,9 @@ export default class Login extends Component {
 
         this.state = {};
 
-        this.initForm();
+        this.initForm({
+            leaveConfirmation: false
+        });
     }
 
     componentDidMount() {
@@ -67,6 +64,7 @@ export default class Login extends Component {
         }
     }
 
+    @withFormErrorHandlers
     async submitHandler() {
         const t = this.props.t;
 

@@ -2,24 +2,13 @@
 
 import React, {Component} from 'react';
 import {withTranslation} from '../lib/i18n';
-import {
-    requiresAuthenticatedUser,
-    Title,
-    Toolbar,
-    withPageHelpers
-} from '../lib/page'
-import {
-    withAsyncErrorHandler,
-    withErrorHandling
-} from '../lib/error-handling';
-import axios
-    from '../lib/axios';
+import {requiresAuthenticatedUser, Title, Toolbar, withPageHelpers} from '../lib/page'
+import {withAsyncErrorHandler, withErrorHandling} from '../lib/error-handling';
+import axios from '../lib/axios';
 import {ReportState} from '../../../shared/reports';
 import {getUrl} from "../lib/urls";
 import {Button} from "../lib/bootstrap-components";
-import {Link} from "react-router-dom";
-import PropTypes
-    from "prop-types";
+import PropTypes from "prop-types";
 import {withComponentMixins} from "../lib/decorator-helpers";
 
 @withComponentMixins([
@@ -43,7 +32,7 @@ export default class ViewAndOutput extends Component {
         this.viewTypes = {
             view: {
                 url: 'rest/report-content',
-                getTitle: name => t('reportName', { name }),
+                getTitle: name => t('reportName-1', { name }),
                 loading: t('loadingReport'),
                 finishedStates: new Set([ReportState.FINISHED]),
                 getContent: content => <div dangerouslySetInnerHTML={{ __html: content }}/>

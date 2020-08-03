@@ -2,26 +2,13 @@
 
 import React, {Component} from 'react';
 import {withTranslation} from '../../lib/i18n';
-import {
-    LinkButton,
-    requiresAuthenticatedUser,
-    Title,
-    Toolbar,
-    withPageHelpers
-} from '../../lib/page';
-import {
-    withAsyncErrorHandler,
-    withErrorHandling
-} from '../../lib/error-handling';
+import {LinkButton, requiresAuthenticatedUser, Title, Toolbar, withPageHelpers} from '../../lib/page';
+import {withErrorHandling} from '../../lib/error-handling';
 import {Table} from '../../lib/table';
 import {Icon} from "../../lib/bootstrap-components";
-import {checkPermissions} from "../../lib/permissions";
-import {
-    tableAddDeleteButton,
-    tableRestActionDialogInit,
-    tableRestActionDialogRender
-} from "../../lib/modals";
+import {tableAddDeleteButton, tableRestActionDialogInit, tableRestActionDialogRender} from "../../lib/modals";
 import {withComponentMixins} from "../../lib/decorator-helpers";
+import PropTypes from 'prop-types';
 
 @withComponentMixins([
     withTranslation,
@@ -37,27 +24,15 @@ export default class List extends Component {
         tableRestActionDialogInit(this);
     }
 
-    @withAsyncErrorHandler
-    async fetchPermissions() {
-        const result = await checkPermissions({
-            createCustomForm: {
-                entityTypeId: 'namespace',
-                requiredOperations: ['createCustomForm']
-            }
-        });
-
-        this.setState({
-            createPermitted: result.data.createCustomForm
-        });
-    }
-
-    componentDidMount() {
-        // noinspection JSIgnoredPromiseFromCall
-        this.fetchPermissions();
+    static propTypes = {
+        permissions: PropTypes.object
     }
 
     render() {
         const t = this.props.t;
+
+        const permissions = this.props.permissions;
+        const createPermitted = permissions.createCustomForm;
 
         const columns = [
             { data: 1, title: t('name') },
@@ -91,7 +66,7 @@ export default class List extends Component {
         return (
             <div>
                 {tableRestActionDialogRender(this)}
-                {this.state.createPermitted &&
+                {createPermitted &&
                     <Toolbar>
                         <LinkButton to="/lists/forms/create" className="btn-primary" icon="plus" label={t('createCustomForm')}/>
                     </Toolbar>

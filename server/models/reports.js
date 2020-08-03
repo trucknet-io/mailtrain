@@ -102,7 +102,7 @@ async function updateWithConsistencyCheck(context, entity) {
         }
 
         await namespaceHelpers.validateEntity(tx, entity);
-        await namespaceHelpers.validateMove(context, entity, existing, 'report', 'createReport', 'delete');
+        await namespaceHelpers.validateMoveTx(tx, context, entity, existing, 'report', 'createReport', 'delete');
 
         entity.params = JSON.stringify(entity.params);
 
@@ -236,6 +236,8 @@ async function _getCampaignStatistics(campaign, select, joins, unionQryFn, listQ
             commonFieldsMapping[`${prefix}:link`] = alias + '.link';
             commonFieldsMapping[`${prefix}:country`] = alias + '.country';
             commonFieldsMapping[`${prefix}:deviceType`] = alias + '.device_type';
+            commonFieldsMapping[`${prefix}:ip`] = alias + '.ip';
+            commonFieldsMapping[`${prefix}:created`] = alias + '.created';
 
             knexJoinFns.push((qry, cpgListId) => qry.leftJoin('campaign_links AS ' + alias, getConds(alias, cpgListId)));
 

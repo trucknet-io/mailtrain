@@ -9,14 +9,29 @@ import Files from "../lib/files";
 import MosaicoCUD from './mosaico/CUD';
 import MosaicoList from './mosaico/List';
 import {ellipsizeBreadcrumbLabel} from "../lib/helpers";
-
+import {namespaceCheckPermissions} from "../lib/namespace";
 
 function getMenus(t) {
     return {
         'templates': {
             title: t('templates'),
             link: '/templates',
-            panelComponent: TemplatesList,
+            checkPermissions: {
+                createTemplate: {
+                    entityTypeId: 'namespace',
+                    requiredOperations: ['createTemplate']
+                },
+                createMosaicoTemplate: {
+                    entityTypeId: 'namespace',
+                    requiredOperations: ['createMosaicoTemplate']
+                },
+                viewMosaicoTemplate: {
+                    entityTypeId: 'mosaicoTemplate',
+                    requiredOperations: ['view']
+                },
+                ...namespaceCheckPermissions('createTemplate')
+            },
+            panelRender: props => <TemplatesList permissions={props.permissions}/>,
             children: {
                 ':templateId([0-9]+)': {
                     title: resolved => t('templateName', {name: ellipsizeBreadcrumbLabel(resolved.template.name)}),
@@ -28,8 +43,8 @@ function getMenus(t) {
                         ':action(edit|delete)': {
                             title: t('edit'),
                             link: params => `/templates/${params.templateId}/edit`,
-                            visible: resolved => resolved.template.permissions.includes('edit'),
-                            panelRender: props => <TemplatesCUD action={props.match.params.action} entity={props.resolved.template} setPanelInFullScreen={props.setPanelInFullScreen} />
+                            visible: resolved => resolved.template.permissions.includes('view') || resolved.template.permissions.includes('edit'),
+                            panelRender: props => <TemplatesCUD action={props.match.params.action} entity={props.resolved.template} permissions={props.permissions} setPanelInFullScreen={props.setPanelInFullScreen} />
                         },
                         files: {
                             title: t('files'),
@@ -47,12 +62,15 @@ function getMenus(t) {
                 },
                 create: {
                     title: t('create'),
-                    panelRender: props => <TemplatesCUD action="create" />
+                    panelRender: props => <TemplatesCUD action="create" permissions={props.permissions} />
                 },
                 mosaico: {
                     title: t('mosaicoTemplates'),
                     link: '/templates/mosaico',
-                    panelComponent: MosaicoList,
+                    checkPermissions: {
+                        ...namespaceCheckPermissions('createMosaicoTemplate')
+                    },
+                    panelRender: props => <MosaicoList  permissions={props.permissions}/>,
                     children: {
                         ':mosaiceTemplateId([0-9]+)': {
                             title: resolved => t('mosaicoTemplateName', {name: ellipsizeBreadcrumbLabel(resolved.mosaicoTemplate.name)}),
@@ -64,8 +82,8 @@ function getMenus(t) {
                                 ':action(edit|delete)': {
                                     title: t('edit'),
                                     link: params => `/templates/mosaico/${params.mosaiceTemplateId}/edit`,
-                                    visible: resolved => resolved.mosaicoTemplate.permissions.includes('edit'),
-                                    panelRender: props => <MosaicoCUD action={props.match.params.action} entity={props.resolved.mosaicoTemplate} />
+                                    visible: resolved => resolved.mosaicoTemplate.permissions.includes('view') || resolved.mosaicoTemplate.permissions.includes('edit'),
+                                    panelRender: props => <MosaicoCUD action={props.match.params.action} entity={props.resolved.mosaicoTemplate} permissions={props.permissions}/>
                                 },
                                 files: {
                                     title: t('files'),
@@ -90,7 +108,7 @@ function getMenus(t) {
                         create: {
                             title: t('create'),
                             extraParams: [':wizard?'],
-                            panelRender: props => <MosaicoCUD action="create" wizard={props.match.params.wizard} />
+                            panelRender: props => <MosaicoCUD action="create" wizard={props.match.params.wizard} permissions={props.permissions} />
                         }
                     }
                 }

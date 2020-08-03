@@ -1,40 +1,24 @@
 'use strict';
 
-import React
-    from 'react';
+import React from 'react';
 
-import Status
-    from './Status';
-import Statistics
-    from './Statistics';
-import CampaignsCUD
-    from './CUD';
-import Content
-    from './Content';
-import CampaignsList
-    from './List';
-import Share
-    from '../shares/Share';
-import Files
-    from "../lib/files";
-import {
-    CampaignSource,
-    CampaignStatus,
-    CampaignType
-} from "../../../shared/campaigns";
-import TriggersCUD
-    from './triggers/CUD';
-import TriggersList
-    from './triggers/List';
-import StatisticsSubsList
-    from "./StatisticsSubsList";
+import Status from './Status';
+import Statistics from './Statistics';
+import CampaignsCUD from './CUD';
+import Content from './Content';
+import CampaignsList from './List';
+import Share from '../shares/Share';
+import Files from "../lib/files";
+import {CampaignSource, CampaignType} from "../../../shared/campaigns";
+import TriggersCUD from './triggers/CUD';
+import TriggersList from './triggers/List';
+import StatisticsSubsList from "./StatisticsSubsList";
 import {SubscriptionStatus} from "../../../shared/lists";
-import StatisticsOpened
-    from "./StatisticsOpened";
-import StatisticsLinkClicks
-    from "./StatisticsLinkClicks";
-import TemplatesCUD from "../templates/root";
+import StatisticsOpened from "./StatisticsOpened";
+import StatisticsLinkClicks from "./StatisticsLinkClicks";
 import {ellipsizeBreadcrumbLabel} from "../lib/helpers"
+import {namespaceCheckPermissions} from "../lib/namespace";
+import Clone from "./Clone";
 
 function getMenus(t) {
     const aggLabels = {
@@ -42,11 +26,24 @@ function getMenus(t) {
         'devices': t('devices')
     };
 
+    const createLabels = {
+        [CampaignType.REGULAR]: t('createRegularCampaign'),
+        [CampaignType.RSS]: t('createRssCampaign'),
+        [CampaignType.TRIGGERED]: t('createTriggeredCampaign')
+    };
+
     return {
         'campaigns': {
             title: t('campaigns'),
             link: '/campaigns',
-            panelComponent: CampaignsList,
+            checkPermissions: {
+                createCampaign: {
+                    entityTypeId: 'namespace',
+                    requiredOperations: ['createCampaign']
+                },
+                ...namespaceCheckPermissions('createCampaign')
+            },
+            panelRender: props => <CampaignsList permissions={props.permissions}/>,
             children: {
                 ':campaignId([0-9]+)': {
                     title: resolved => t('campaignName', {name: ellipsizeBreadcrumbLabel(resolved.campaign.name)}),
@@ -58,7 +55,7 @@ function getMenus(t) {
                         status: {
                             title: t('status'),
                             link: params => `/campaigns/${params.campaignId}/status`,
-                            visible: resolved => resolved.campaign.permissions.includes('viewStats'),
+                            visible: resolved => resolved.campaign.permissions.includes('view'),
                             panelRender: props => <Status entity={props.resolved.campaign} />
                         },
                         statistics: {
@@ -111,8 +108,8 @@ function getMenus(t) {
                         ':action(edit|delete)': {
                             title: t('edit'),
                             link: params => `/campaigns/${params.campaignId}/edit`,
-                            visible: resolved => resolved.campaign.permissions.includes('edit'),
-                            panelRender: props => <CampaignsCUD action={props.match.params.action} entity={props.resolved.campaign} />
+                            visible: resolved => resolved.campaign.permissions.includes('view') || resolved.campaign.permissions.includes('edit'),
+                            panelRender: props => <CampaignsCUD action={props.match.params.action} entity={props.resolved.campaign} permissions={props.permissions} />
                         },
                         content: {
                             title: t('content'),
@@ -120,7 +117,7 @@ function getMenus(t) {
                             resolve: {
                                 campaignContent: params => `rest/campaigns-content/${params.campaignId}`
                             },
-                            visible: resolved => resolved.campaign.permissions.includes('edit') && (resolved.campaign.source === CampaignSource.CUSTOM || resolved.campaign.source === CampaignSource.CUSTOM_FROM_TEMPLATE || resolved.campaign.source === CampaignSource.CUSTOM_FROM_CAMPAIGN),
+                            visible: resolved => (resolved.campaign.permissions.includes('view') || resolved.campaign.permissions.includes('edit')) && (resolved.campaign.source === CampaignSource.CUSTOM || resolved.campaign.source === CampaignSource.CUSTOM_FROM_TEMPLATE || resolved.campaign.source === CampaignSource.CUSTOM_FROM_CAMPAIGN),
                             panelRender: props => <Content entity={props.resolved.campaignContent} setPanelInFullScreen={props.setPanelInFullScreen} />
                         },
                         files: {
@@ -170,16 +167,30 @@ function getMenus(t) {
                     }
                 },
                 'create-regular': {
-                    title: t('createRegularCampaign'),
-                    panelRender: props => <CampaignsCUD action="create" type={CampaignType.REGULAR} />
+                    title: createLabels[CampaignType.REGULAR],
+                    panelRender: props => <CampaignsCUD action="create" type={CampaignType.REGULAR} permissions={props.permissions} />
                 },
                 'create-rss': {
-                    title: t('createRssCampaign'),
-                    panelRender: props => <CampaignsCUD action="create" type={CampaignType.RSS} />
+                    title: createLabels[CampaignType.RSS],
+                    panelRender: props => <CampaignsCUD action="create" type={CampaignType.RSS} permissions={props.permissions} />
                 },
                 'create-triggered': {
-                    title: t('createTriggeredCampaign'),
-                    panelRender: props => <CampaignsCUD action="create" type={CampaignType.TRIGGERED} />
+                    title: createLabels[CampaignType.TRIGGERED],
+                    panelRender: props => <CampaignsCUD action="create" type={CampaignType.TRIGGERED} permissions={props.permissions} />
+                },
+                'clone': {
+                    title: t('Create Campaign'),
+                    link: params => `/campaigns/clone`,
+                    panelRender: props => <Clone />,
+                    children: {
+                        ':existingCampaignId([0-9]+)': {
+                            title: resolved => createLabels[resolved.existingCampaign.type],
+                            resolve: {
+                                existingCampaign: params => `rest/campaigns-settings/${params.existingCampaignId}`
+                            },
+                            panelRender: props => <CampaignsCUD action="create" createFromCampaign={props.resolved.existingCampaign} permissions={props.permissions} />
+                        }
+                    }
                 }
             }
         }

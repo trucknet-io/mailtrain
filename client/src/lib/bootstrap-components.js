@@ -2,12 +2,8 @@
 
 import React, {Component} from 'react';
 import {withTranslation} from './i18n';
-import PropTypes
-    from 'prop-types';
-import {
-    withAsyncErrorHandler,
-    withErrorHandling
-} from './error-handling';
+import PropTypes from 'prop-types';
+import {withAsyncErrorHandler, withErrorHandling} from './error-handling';
 import {withComponentMixins} from "./decorator-helpers";
 
 @withComponentMixins([
@@ -115,6 +111,7 @@ export class Button extends Component {
 export class ButtonDropdown extends Component {
     static propTypes = {
         label: PropTypes.oneOfType([PropTypes.string, PropTypes.object]),
+        icon: PropTypes.string,
         className: PropTypes.string,
         buttonClassName: PropTypes.string,
         menuClassName: PropTypes.string
@@ -123,19 +120,24 @@ export class ButtonDropdown extends Component {
     render() {
         const props = this.props;
 
-        const className = 'dropdown' + (props.className ? ' ' + props.className : '');
+        const className = 'btn-group' + (props.className ? ' ' + props.className : '');
         const buttonClassName = 'btn dropdown-toggle' + (props.buttonClassName ? ' ' + props.buttonClassName : '');
         const menuClassName = 'dropdown-menu' + (props.menuClassName ? ' ' + props.menuClassName : '');
 
-        return (
-            <div className="dropdown" className={className}>
-                <button type="button" className={buttonClassName} data-toggle="dropdown" aria-haspopup="true" aria-expanded="false">
-                    {props.label}
-                </button>
-                <ul className={menuClassName}>
-                    {props.children}
-                </ul>
+        let icon;
+        if (props.icon) {
+            icon = <Icon icon={props.icon}/>
+        }
 
+        let iconSpacer;
+        if (props.icon && props.label) {
+            iconSpacer = ' ';
+        }
+
+        return (
+            <div className={className}>
+                <button type="button" className={buttonClassName} data-toggle="dropdown" aria-haspopup="true" aria-expanded="false">{icon}{iconSpacer}{props.label}</button>
+                <ul className={menuClassName}>{props.children}</ul>
             </div>
         );
     }
@@ -301,7 +303,7 @@ export class ModalDialog extends Component {
             buttons = [];
             for (let idx = 0; idx < this.props.buttons.length; idx++) {
                 const buttonSpec = this.props.buttons[idx];
-                const button = <Button key={idx} label={buttonSpec.label} className={buttonSpec.className} onClickAsync={async () => this.onButtonClick(idx)} />
+                const button = <Button key={idx} label={buttonSpec.label} className={buttonSpec.className} onClickAsync={async () => await this.onButtonClick(idx)} />
                 buttons.push(button);
             }
         }

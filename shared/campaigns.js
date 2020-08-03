@@ -38,11 +38,33 @@ const CampaignStatus = {
 
     // For campaign types: NORMAL, RSS_ENTRY
     SENDING: 7,
+    PAUSING: 8,
 
-    MAX: 8
+    MAX: 9
 };
 
-const campaignOverridables = ['from_name', 'from_email', 'reply_to', 'subject'];
+
+const CampaignMessageStatus = {
+    MIN: 0,
+
+    SENT: 1,
+    UNSUBSCRIBED: 2,
+    BOUNCED: 3,
+    COMPLAINED: 4,
+    SCHEDULED: 5,
+
+    FAILED: 6,
+
+    MAX: 6
+};
+
+const CampaignMessageErrorType = {
+  TRANSIENT: 0,
+  PERMANENT: 1
+};
+
+
+const campaignOverridables = ['from_name', 'from_email', 'reply_to'];
 
 function getSendConfigurationPermissionRequiredForSend(campaign, sendConfiguration) {
     let allowedOverride = false;
@@ -74,5 +96,7 @@ module.exports = {
     CampaignType,
     CampaignStatus,
     campaignOverridables,
+    CampaignMessageStatus,
+    CampaignMessageErrorType,
     getSendConfigurationPermissionRequiredForSend
 };

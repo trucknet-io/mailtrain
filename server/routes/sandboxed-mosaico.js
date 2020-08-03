@@ -1,6 +1,6 @@
 'use strict';
 
-const config = require('config');
+const config = require('../lib/config');
 const path = require('path');
 const express = require('express');
 const routerFactory = require('../lib/router-async');
@@ -141,7 +141,7 @@ async function getRouter(appType) {
             const tmpl = await mosaicoTemplates.getById(req.context, castToInteger(req.params.mosaicoTemplateId));
 
             res.set('Content-Type', 'text/html');
-            res.send(base(tmpl.data.html, getTrustedUrl(), getSandboxUrl('', req.context), getPublicUrl()));
+            res.send(base(tmpl.data.html, tmpl.tag_language, getTrustedUrl(), getSandboxUrl('', req.context), getPublicUrl()));
         });
 
         // Mosaico looks for block thumbnails in edres folder relative to index.html of the template. We respond to such requests here.
@@ -206,7 +206,7 @@ async function getRouter(appType) {
             const lang = req.locale.language;
             if (lang && lang !== 'en') {
                 try {
-                    const file = path.join(__dirname, '..', '..', 'client', 'static', 'mosaico', 'lang', 'mosaico-' + lang + '.json');
+                    const file = path.join(__dirname, '..', '..', 'client', 'static', 'mosaico', 'rs', 'lang', 'mosaico-' + lang + '.json');
                     languageStrings = await fs.readFile(file, 'utf8');
                 } catch (err) {
                 }

@@ -4,12 +4,13 @@ import React, {Component} from 'react';
 import {withTranslation} from './i18n';
 import {TreeTableSelect} from './form';
 import {withComponentMixins} from "./decorator-helpers";
+import mailtrainConfig from 'mailtrainConfig';
 
 
 @withComponentMixins([
     withTranslation
 ])
-class NamespaceSelect extends Component {
+export class NamespaceSelect extends Component {
     render() {
         const t = this.props.t;
 
@@ -19,15 +20,33 @@ class NamespaceSelect extends Component {
     }
 }
 
-function validateNamespace(t, state) {
+export function validateNamespace(t, state) {
     if (!state.getIn(['namespace', 'value'])) {
-        state.setIn(['namespace', 'error'], t('namespacemustBeSelected'));
+        state.setIn(['namespace', 'error'], t('namespaceMustBeSelected'));
     } else {
         state.setIn(['namespace', 'error'], null);
     }
 }
 
-export {
-    NamespaceSelect,
-    validateNamespace
-};
+export function getDefaultNamespace(permissions) {
+    return permissions.viewUsersNamespace && permissions.createEntityInUsersNamespace ? mailtrainConfig.user.namespace : null;
+}
+
+export function namespaceCheckPermissions(createOperation) {
+    if (mailtrainConfig.user) {
+        return {
+            createEntityInUsersNamespace: {
+                entityTypeId: 'namespace',
+                entityId: mailtrainConfig.user.namespace,
+                requiredOperations: [createOperation]
+            },
+            viewUsersNamespace: {
+                entityTypeId: 'namespace',
+                entityId: mailtrainConfig.user.namespace,
+                requiredOperations: ['view']
+            }
+        };
+    } else {
+        return {};
+    }
+}

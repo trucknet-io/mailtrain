@@ -3,17 +3,9 @@
 import React, {Component} from 'react';
 import {withTranslation} from '../lib/i18n';
 import {Trans} from 'react-i18next';
-import {
-    requiresAuthenticatedUser,
-    Title,
-    withPageHelpers
-} from '../lib/page'
-import {
-    withAsyncErrorHandler,
-    withErrorHandling
-} from '../lib/error-handling';
-import axios
-    from '../lib/axios';
+import {requiresAuthenticatedUser, Title, withPageHelpers} from '../lib/page'
+import {withAsyncErrorHandler, withErrorHandling} from '../lib/error-handling';
+import axios from '../lib/axios';
 import {Button} from '../lib/bootstrap-components';
 import {getUrl} from "../lib/urls";
 import {withComponentMixins} from "../lib/decorator-helpers";
@@ -111,7 +103,7 @@ export default class API extends Component {
                 </p>
 
                 <p>
-                    <strong>GET</strong> {t('arguments')}
+                    {t('Query params')}
                 </p>
                 <ul>
                     <li><strong>access_token</strong> – {t('yourPersonalAccessToken')}</li>
@@ -146,7 +138,7 @@ export default class API extends Component {
                     <strong>{t('example')}</strong>
                 </p>
 
-                <pre>curl -XPOST '{getUrl(`api/subscribe/B16uVTdW?access_token=${accessToken}`)}' \
+                <pre>curl -XPOST '{getUrl(`api/subscribe/B16uVTdW?access_token=${accessToken}`)}' \<br/>
 --data 'EMAIL=test@example.com&amp;MERGE_CHECKBOX=yes&amp;REQUIRE_CONFIRMATION=yes'</pre>
 
                 <h4>POST /api/unsubscribe/:listId – {t('removeSubscription')}</h4>
@@ -156,7 +148,7 @@ export default class API extends Component {
                 </p>
 
                 <p>
-                    <strong>GET</strong> {t('arguments')}
+                    {t('Query params')}
                 </p>
                 <ul>
                     <li><strong>access_token</strong> – {t('yourPersonalAccessToken')}</li>
@@ -173,7 +165,7 @@ export default class API extends Component {
                     <strong>{t('example')}</strong>
                 </p>
 
-                <pre>curl -XPOST '{getUrl(`api/unsubscribe/B16uVTdW?access_token=${accessToken}`)}' \
+                <pre>curl -XPOST '{getUrl(`api/unsubscribe/B16uVTdW?access_token=${accessToken}`)}' \<br/>
 --data 'EMAIL=test@example.com'</pre>
 
                 <h4>POST /api/delete/:listId – {t('deleteSubscription')}</h4>
@@ -183,7 +175,7 @@ export default class API extends Component {
                 </p>
 
                 <p>
-                    <strong>GET</strong> {t('arguments')}
+                    {t('Query params')}
                 </p>
                 <ul>
                     <li><strong>access_token</strong> – {t('yourPersonalAccessToken')}</li>
@@ -200,7 +192,7 @@ export default class API extends Component {
                     <strong>{t('example')}</strong>
                 </p>
 
-                <pre>curl -XPOST '{getUrl(`api/delete/B16uVTdW?access_token=${accessToken}`)}' \
+                <pre>curl -XPOST '{getUrl(`api/delete/B16uVTdW?access_token=${accessToken}`)}' \<br/>
 --data 'EMAIL=test@example.com'</pre>
 
                 <h4>POST /api/field/:listId – {t('addNewCustomField')}</h4>
@@ -210,7 +202,7 @@ export default class API extends Component {
                 </p>
 
                 <p>
-                    <strong>GET</strong> {t('arguments')}
+                    {t('Query params')}
                 </p>
                 <ul>
                     <li><strong>access_token</strong> – {t('yourPersonalAccessToken')}</li>
@@ -248,7 +240,7 @@ export default class API extends Component {
                     <strong>{t('example')}</strong>
                 </p>
 
-                <pre>curl -XPOST '{getUrl(`api/field/B16uVTdW?access_token=${accessToken}`)}' \
+                <pre>curl -XPOST '{getUrl(`api/field/B16uVTdW?access_token=${accessToken}`)}' \<br/>
 --data 'NAME=Birthday&amp;TYPE=birthday-us&amp;VISIBLE=yes'</pre>
 
                 <h4>GET /api/blacklist/get – {t('getListOfBlacklistedEmails')}</h4>
@@ -258,7 +250,7 @@ export default class API extends Component {
                 </p>
 
                 <p>
-                    <strong>GET</strong> {t('arguments')}
+                    {t('Query params')}
                 </p>
                 <ul>
                     <li><strong>access_token</strong> – {t('yourPersonalAccessToken')}
@@ -283,7 +275,7 @@ export default class API extends Component {
                 </p>
 
                 <p>
-                    <strong>GET</strong> {t('arguments')}
+                    {t('Query params')}
                 </p>
                 <ul>
                     <li><strong>access_token</strong> – {t('yourPersonalAccessToken')}</li>
@@ -300,8 +292,8 @@ export default class API extends Component {
                     <strong>{t('example')}</strong>
                 </p>
 
-                <pre>curl -XPOST '{getUrl(`api/blacklist/add?access_token={accessToken}`)}' \
---data 'EMAIL=test@example.com&amp;'</pre>
+                <pre>curl -XPOST '{getUrl(`api/blacklist/add?access_token=${accessToken}`)}' \<br/>
+--data 'EMAIL=test@example.com'</pre>
 
                 <h4>POST /api/blacklist/delete – {t('deleteEmailFromBlacklist')}</h4>
 
@@ -310,7 +302,7 @@ export default class API extends Component {
                 </p>
 
                 <p>
-                    <strong>GET</strong> {t('arguments')}
+                    {t('Query params')}
                 </p>
                 <ul>
                     <li><strong>access_token</strong> – {t('yourPersonalAccessToken')}</li>
@@ -327,8 +319,8 @@ export default class API extends Component {
                     <strong>{t('example')}</strong>
                 </p>
 
-                <pre>curl -XPOST '{getUrl(`api/blacklist/delete?access_token=${accessToken}`)}' \
---data 'EMAIL=test@example.com&amp;'</pre>
+                <pre>curl -XPOST '{getUrl(`api/blacklist/delete?access_token=${accessToken}`)}' \<br/>
+--data 'EMAIL=test@example.com'</pre>
 
                 <h4>GET /api/lists/:email – {t('getTheListsAUserHasSubscribedTo')}</h4>
 
@@ -337,7 +329,7 @@ export default class API extends Component {
                 </p>
 
                 <p>
-                    <strong>GET</strong> {t('arguments')}
+                    {t('Query params')}
                 </p>
                 <ul>
                     <li><strong>access_token</strong> – {t('yourPersonalAccessToken')}</li>
@@ -350,14 +342,117 @@ export default class API extends Component {
                 <pre>curl -XGET '{getUrl(`api/lists/test@example.com?access_token=${accessToken}`)}'</pre>
 
 
-                <h4>GET /api/rss/fetch/:campaignCid – {t('Trigger fetch of a campaign')}</h4>
+                <h4>GET /api/lists-by-namespace/:namespaceId – {t('getListsInNamespace')}</h4>
 
                 <p>
-                    {t('Forces the RSS feed check to immediately check the campaign with the given CID (in :campaignCid). It works only for RSS campaigns.')}
+                  {t('retrieveTheListsThatTheNamespaceHas')}
                 </p>
 
                 <p>
-                    <strong>GET</strong> {t('arguments')}
+                  {t('Query params')}
+                </p>
+                <ul>
+                  <li><strong>access_token</strong> – {t('yourPersonalAccessToken')}</li>
+                </ul>
+
+                <p>
+                  <strong>{t('example')}</strong>
+                </p>
+
+                <pre>curl -XGET '{getUrl(`api/lists-by-namespace/1?access_token=${accessToken}`)}'</pre>
+
+
+                <h4>POST /api/lists – {t('createList')}</h4>
+
+                <p>
+                  {t('createListDescription')}
+                </p>
+
+                <p>
+                  {t('Query params')}
+                </p>
+                <ul>
+                  <li><strong>access_token</strong> – {t('yourPersonalAccessToken')}</li>
+                </ul>
+
+                <p>
+                  <strong>POST</strong> {t('arguments')}
+                </p>
+                <ul>
+                  <li><strong>NAMESPACE</strong> – {t('namespace')} (<em>{t('required')}</em>)</li>
+                  <li><strong>UNSUBSCRIPTION_MODE</strong> – {t('unsubscription')} (<em>{t('required')}</em>):
+                    <ul>
+                      <li><strong>0</strong> - {t('onestepIeNoEmailWithConfirmationLink')}</li>
+                      <li><strong>1</strong> - {t('onestepWithUnsubscriptionFormIeNoEmail')}</li>
+                      <li><strong>2</strong> - {t('twostepIeAnEmailWithConfirmationLinkWill')}</li>
+                      <li><strong>3</strong> - {t('twostepWithUnsubscriptionFormIeAnEmail')}</li>
+                      <li><strong>4</strong> - {t('manualIeUnsubscriptionHasToBePerformedBy')}</li>
+                    </ul>
+                  </li>
+                  <li><strong>NAME</strong> – {t('name')}</li>
+                  <li><strong>DESCRIPTION</strong> – {t('description')}</li>
+                  <li><strong>HOMEPAGE</strong> – {t('homepage')}</li>
+                  <li><strong>CONTACT_EMAIL</strong> – {t('contactEmail')}</li>
+                  <li><strong>DEFAULT_FORM</strong> – {t('webAndEmailFormsAndTemplatesUsedIn')}</li>
+                  <li><strong>FIELDWIZARD</strong> – {t('representationOfSubscribersName')}:
+                    <ul>
+                      <li><strong>none</strong> - {t('emptyCustomNoFields')}</li>
+                      <li><strong>full_name</strong> - {t('nameOneField')}</li>
+                      <li><strong>first_last_name</strong> - {t('firstNameAndLastNameTwoFields')}</li>
+                    </ul>
+                  </li>
+                  <li><strong>TO_NAME</strong> – {t('recipientsNameTemplate')}</li>
+                  <li><strong>LISTUNSUBSCRIBE_DISABLED</strong> – {t('doNotSendListUnsubscribeHeaders')}</li>
+                  <li><strong>PUBLIC_SUBSCRIBE</strong> – {t('allowPublicUsersToSubscribeThemselves')}</li>
+                  <li><strong>SEND_CONFIGURATION</strong> – {t('sendConfiguration-1')}</li>
+                </ul>
+
+                <p>
+                  <strong>{t('example')}</strong>
+                </p>
+
+                <pre>curl -XPOST '{getUrl(`api/list?access_token=${accessToken}`)}' \<br/>
+                  -d 'NAMESPACE=1' \<br/>
+                  -d 'UNSUBSCRIPTION_MODE=0' \<br/>
+                  -d 'NAME=list1' \<br/>
+                  -d 'DESCRIPTION=a very nice list' \<br/>
+                  -d 'CONTACT_EMAIL=test@example.com' \<br/>
+                  -d 'HOMEPAGE=example.com' \<br/>
+                  -d 'FIELDWIZARD=first_last_name' \<br/>
+                  -d 'SEND_CONFIGURATION=1' \<br/>
+                  -d 'PUBLIC_SUBSCRIBE=1' \<br/>
+                  -d 'LISTUNSUBSCRIBE_DISABLED=0'
+                </pre>
+
+
+                <h4>DELETE /api/lists/:listId – {t('deleteList')}</h4>
+
+                <p>
+                  {t('deleteListDescription')}
+                </p>
+
+                <p>
+                  {t('Query params')}
+                </p>
+                <ul>
+                  <li><strong>access_token</strong> – {t('yourPersonalAccessToken')}</li>
+                </ul>
+
+                <p>
+                  <strong>{t('example')}</strong>
+                </p>
+
+                <pre>curl -XDELETE '{getUrl(`api/list/B16uVTdW?access_token=${accessToken}`)}'</pre>
+
+
+                <h4>GET /api/rss/fetch/:campaignCid – {t('triggerFetchOfACampaign')}</h4>
+
+                <p>
+                    {t('forcesTheRssFeedCheckToImmediatelyCheck')}
+                </p>
+
+                <p>
+                    {t('Query params')}
                 </p>
                 <ul>
                     <li><strong>access_token</strong> – {t('yourPersonalAccessToken')}</li>
@@ -372,11 +467,11 @@ export default class API extends Component {
                 <h4>POST /api/templates/:templateId/send – {t('sendTransactionalEmail')}</h4>
 
                 <p>
-                    {t('sendSingleEmailByTemplateId')}
+                    {t('sendSingleEmailByTemplateWithGiven')}
                 </p>
 
                 <p>
-                    <strong>GET</strong> {t('arguments')}
+                    {t('Query params')}
                 </p>
                 <ul>
                     <li><strong>access_token</strong> – {t('yourPersonalAccessToken')}</li>
@@ -387,18 +482,18 @@ export default class API extends Component {
                 </p>
                 <ul>
                     <li><strong>EMAIL</strong> – {t('emailAddress')} (<em>{t('required')}</em>)</li>
-                    <li><strong>SEND_CONFIGURATION_ID</strong> – {t('sendConfigurationId')}</li>
+                    <li><strong>SEND_CONFIGURATION_ID</strong> – {t('idOfConfigurationUsedToCreateMailer')}</li>
                     <li><strong>SUBJECT</strong> – {t('subject')}</li>
-                    <li><strong>DATA</strong> – {t('templateData')}: <em>{'{'} "any": ["type", {'{'}"of": "data"{'}'}] {'}'}</em></li>
-                    <li><strong>VARIABLES</strong> – {t('templateVariables')}: <em>{'{'} "FOO": "bar" {'}'}</em></li>
+                    <li><strong>TAGS</strong> – {t('mapOfTemplatesubjectVariablesToReplace')}</li>
+                    <li><strong>ATTACHMENTS</strong> – {t('Attachments (format as consumed by nodemailer)')}</li>
                 </ul>
 
                 <p>
                     <strong>{t('example')}</strong>
                 </p>
 
-                <pre>curl -XPOST '{getUrl(`api/templates/1/send?access_token={accessToken}`)}' \
---data 'EMAIL=test@example.com&amp;SUBJECT=Test&amp;VARIABLES[FOO]=bar&amp;VARIABLES[TEST]=example'</pre>
+                <pre>curl -XPOST '{getUrl(`api/templates/1/send?access_token=${accessToken}`)}' \<br/>
+--data 'EMAIL=test@example.com&amp;SUBJECT=Test&amp;TAGS[FOO]=bar&amp;TAGS[TEST]=example'</pre>
             </div>
         );
     }

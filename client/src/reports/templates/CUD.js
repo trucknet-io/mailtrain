@@ -1,38 +1,29 @@
 'use strict';
 
 import React, {Component} from 'react';
-import PropTypes
-    from 'prop-types';
+import PropTypes from 'prop-types';
 import {Trans} from 'react-i18next';
 import {withTranslation} from '../../lib/i18n';
-import {
-    LinkButton,
-    requiresAuthenticatedUser,
-    Title,
-    withPageHelpers
-} from '../../lib/page'
+import {LinkButton, requiresAuthenticatedUser, Title, withPageHelpers} from '../../lib/page'
 import {
     ACEEditor,
     Button,
     ButtonRow,
     Dropdown,
+    filterData,
     Form,
     FormSendMethod,
     InputField,
     TextArea,
-    withForm
+    withForm,
+    withFormErrorHandlers
 } from '../../lib/form';
 import {withErrorHandling} from '../../lib/error-handling';
-import {
-    NamespaceSelect,
-    validateNamespace
-} from '../../lib/namespace';
+import {getDefaultNamespace, NamespaceSelect, validateNamespace} from '../../lib/namespace';
 import {DeleteModalDialog} from "../../lib/modals";
-import mailtrainConfig
-    from 'mailtrainConfig';
-import 'brace/mode/javascript';
-import 'brace/mode/json';
-import 'brace/mode/handlebars';
+import 'ace-builds/src-noconflict/mode-javascript';
+import 'ace-builds/src-noconflict/mode-json';
+import 'ace-builds/src-noconflict/mode-handlebars';
 import {withComponentMixins} from "../../lib/decorator-helpers";
 
 @withComponentMixins([
@@ -54,7 +45,12 @@ export default class CUD extends Component {
     static propTypes = {
         action: PropTypes.string.isRequired,
         wizard: PropTypes.string,
-        entity: PropTypes.object
+        entity: PropTypes.object,
+        permissions: PropTypes.object
+    }
+
+    submitFormValuesMutator(data) {
+        return filterData(data, ['name', 'description', 'mime_type', 'user_fields', 'js', 'hbs', 'namespace']);
     }
 
     componentDidMount() {
@@ -68,7 +64,7 @@ export default class CUD extends Component {
                 this.populateFormValues({
                     name: '',
                     description: 'Generates a campaign report listing all subscribers along with open counts.',
-                    namespace: mailtrainConfig.user.namespace,
+                    namespace: getDefaultNamespace(this.props.permissions),
                     mime_type: 'text/html',
                     user_fields:
                         '[\n' +
@@ -118,7 +114,7 @@ export default class CUD extends Component {
                 this.populateFormValues({
                     name: '',
                     description: 'Generates a campaign report as CSV that lists all subscribers along with open counts.',
-                    namespace: mailtrainConfig.user.namespace,
+                    namespace: getDefaultNamespace(this.props.permissions),
                     mime_type: 'text/csv',
                     user_fields:
                         '[\n' +
@@ -148,7 +144,7 @@ export default class CUD extends Component {
                 this.populateFormValues({
                     name: '',
                     description: 'Generates a campaign report with results are aggregated by "Country" custom field. (Note that this custom field has to be presents in the subscription custom fields.)',
-                    namespace: mailtrainConfig.user.namespace,
+                    namespace: getDefaultNamespace(this.props.permissions),
                     mime_type: 'text/html',
                     user_fields:
                         '[\n' +
@@ -219,7 +215,7 @@ export default class CUD extends Component {
                 this.populateFormValues({
                     name: '',
                     description: '',
-                    namespace: mailtrainConfig.user.namespace,
+                    namespace: getDefaultNamespace(this.props.permissions),
                     mime_type: 'text/html',
                     user_fields: '',
                     js: '',
@@ -256,6 +252,7 @@ export default class CUD extends Component {
         validateNamespace(t, state);
     }
 
+    @withFormErrorHandlers
     async submitHandler(submitAndLeave) {
         const t = this.props.t;
 
@@ -276,17 +273,17 @@ export default class CUD extends Component {
         if (submitResult) {
             if (this.props.entity) {
                 if (submitAndLeave) {
-                    this.navigateToWithFlashMessage('/reports/templates', 'success', t('Report template updated'));
+                    this.navigateToWithFlashMessage('/reports/templates', 'success', t('reportTemplateUpdated'));
                 } else {
                     await this.getFormValuesFromURL(`rest/report-templates/${this.props.entity.id}`);
                     this.enableForm();
-                    this.setFormStatusMessage('success', t('Report template updated'));
+                    this.setFormStatusMessage('success', t('reportTemplateUpdated'));
                 }
             } else {
                 if (submitAndLeave) {
-                    this.navigateToWithFlashMessage('/reports/templates', 'success', t('Report template created'));
+                    this.navigateToWithFlashMessage('/reports/templates', 'success', t('reportTemplateCreated'));
                 } else {
-                    this.navigateToWithFlashMessage(`/reports/templates/${submitResult}/edit`, 'success', t('Report template created'));
+                    this.navigateToWithFlashMessage(`/reports/templates/${submitResult}/edit`, 'success', t('reportTemplateCreated'));
                 }
             }
         } else {
@@ -325,8 +322,8 @@ export default class CUD extends Component {
                     <ACEEditor id="hbs" height="700px" mode="handlebars" label={t('renderingTemplate')} help={<Trans i18nKey="useHtmlWithHandlebarsSyntaxSee">Use HTML with Handlebars syntax. See documentation <a href="http://handlebarsjs.com/">here</a>.</Trans>}/>
 
                     <ButtonRow>
-                        <Button type="submit" className="btn-primary" icon="check" label={t('Save')}/>
-                        <Button type="submit" className="btn-primary" icon="check" label={t('Save and leave')} onClickAsync={async () => this.submitHandler(true)}/>
+                        <Button type="submit" className="btn-primary" icon="check" label={t('save')}/>
+                        <Button type="submit" className="btn-primary" icon="check" label={t('saveAndLeave')} onClickAsync={async () => await this.submitHandler(true)}/>
                         {canDelete &&
                             <LinkButton className="btn-danger" icon="trash-alt" label={t('delete')} to={`/reports/templates/${this.props.entity.id}/delete`}/>
                         }

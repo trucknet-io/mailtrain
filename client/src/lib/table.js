@@ -1,29 +1,21 @@
 'use strict';
 
 import React, {Component} from 'react';
-import ReactDOMServer
-    from 'react-dom/server';
-import PropTypes
-    from 'prop-types';
+import ReactDOMServer from 'react-dom/server';
+import PropTypes from 'prop-types';
 import {withTranslation} from './i18n';
 
-import jQuery
-    from 'jquery';
+import jQuery from 'jquery';
 
 import 'datatables.net';
 import 'datatables.net-bs4';
 import 'datatables.net-bs4/css/dataTables.bootstrap4.css';
 
-import axios
-    from './axios';
+import axios from './axios';
 
 import {withPageHelpers} from './page'
-import {
-    withAsyncErrorHandler,
-    withErrorHandling
-} from './error-handling';
-import styles
-    from "./styles.scss";
+import {withAsyncErrorHandler, withErrorHandling} from './error-handling';
+import styles from "./styles.scss";
 import {getUrl} from "./urls";
 import {withComponentMixins} from "./decorator-helpers";
 
@@ -45,6 +37,7 @@ const TableSelectMode = {
 class Table extends Component {
     constructor(props) {
         super(props);
+        this.mounted = false;
         this.selectionMap = this.getSelectionMap(props);
     }
 
@@ -60,13 +53,15 @@ class Table extends Component {
         onSelectionDataAsync: PropTypes.func,
         withHeader: PropTypes.bool,
         refreshInterval: PropTypes.number,
-        pageLength: PropTypes.number
+        pageLength: PropTypes.number,
+        order: PropTypes.array
     }
 
     static defaultProps = {
         selectMode: TableSelectMode.NONE,
         selectionKeyIndex: 0,
-        pageLength: 50
+        pageLength: 50,
+        order: [[0, 'asc']]
     }
 
     refresh() {
@@ -157,11 +152,17 @@ class Table extends Component {
                         values: keysToFetch
                     });
 
+                    const oldSelectionMap = this.selectionMap;
+                    this.selectionMap = new Map();
                     for (const row of response.data) {
                         const key = row[this.props.selectionKeyIndex];
-                        if (this.selectionMap.has(key)) {
+                        if (oldSelectionMap.has(key)) {
                             this.selectionMap.set(key, row);
                         }
+                    }
+
+                    if (this.selectionMap.size !== oldSelectionMap.size) {
+                        this.notifySelection(this.props.onSelectionChangedAsync, this.selectionMap);
                     }
                 }
             }
@@ -192,6 +193,8 @@ class Table extends Component {
     }
 
     componentDidMount() {
+        this.mounted = true;
+
         const columns = this.props.columns.slice();
 
         // XSS protection and actions rendering
@@ -276,6 +279,7 @@ class Table extends Component {
 
         const dtOptions = {
             columns,
+            order: [...this.props.order],
             autoWidth: false,
             pageLength: this.props.pageLength,
             dom: // This overrides Bootstrap 4 settings. It may need to be updated if there are updates in the DataTables Bootstrap 4 plugin.
@@ -372,12 +376,13 @@ class Table extends Component {
     }
 
     componentWillUnmount() {
+        this.mounted = false;
         clearInterval(this.refreshIntervalId);
         clearTimeout(this.refreshTimeoutId);
     }
 
     async notifySelection(eventCallback, newSelectionMap) {
-        if (eventCallback) {
+        if (this.mounted && eventCallback) {
             const selPairs = Array.from(newSelectionMap).sort((l, r) => l[0] - r[0]);
 
             let data = selPairs.map(entry => entry[1]);

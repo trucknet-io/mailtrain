@@ -1,6 +1,6 @@
 'use strict';
 
-const config = require('config');
+const config = require('./config');
 const i18n = require("i18next");
 const fs = require('fs');
 const path = require('path');
@@ -14,6 +14,7 @@ function loadLanguage(longCode) {
 
 loadLanguage('en-US');
 loadLanguage('es-ES');
+loadLanguage('pt-BR');
 resourcesCommon['fk-FK'] = convertToFake(resourcesCommon['en-US']);
 
 const resources = {};
@@ -73,4 +74,3 @@ module.exports.tLog = tLog;
 module.exports.tUI = tUI;
 module.exports.tMark = tMark;
 module.exports.getLangCodeFromExpressLocale = getLangCodeFromExpressLocale;
-

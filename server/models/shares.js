@@ -1,7 +1,7 @@
 'use strict';
 
 const knex = require('../lib/knex');
-const config = require('config');
+const config = require('../lib/config');
 const { enforce, castToInteger } = require('../lib/helpers');
 const dtHelpers = require('../lib/dt-helpers');
 const entitySettings = require('../lib/entity-settings');
@@ -25,8 +25,10 @@ async function listByEntityDTAjax(context, entityTypeId, entityId, params) {
             builder => builder
                 .from(entityType.sharesTable)
                 .innerJoin('users', entityType.sharesTable + '.user', 'users.id')
-                .innerJoin('generated_role_names', 'generated_role_names.role', 'users.role')
-                .where('generated_role_names.entity_type', entityTypeId)
+                .innerJoin('generated_role_names', {
+                    'generated_role_names.role': entityType.sharesTable + '.role',
+                    'generated_role_names.entity_type': knex.raw('?', [entityTypeId])
+                })
                 .where(`${entityType.sharesTable}.entity`, entityId),
             ['users.username', 'users.name', 'generated_role_names.name', 'users.id', entityType.sharesTable + '.auto']
         );
@@ -168,7 +170,6 @@ async function rebuildPermissionsTx(tx, restriction) {
             await tx('users').update('role', adminRole).where('id', getAdminId());
         }
     }
-
 
     // Reset root, own and shared namespaces shares as per the user roles
     const usersAutoSharesQry = tx('users')

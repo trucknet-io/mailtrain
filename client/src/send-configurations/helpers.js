@@ -3,13 +3,7 @@
 import React from "react";
 
 import {MailerType, ZoneMTAType} from "../../../shared/send-configurations";
-import {
-    CheckBox,
-    Dropdown,
-    Fieldset,
-    InputField,
-    TextArea
-} from "../lib/form";
+import {CheckBox, Dropdown, Fieldset, InputField, TextArea} from "../lib/form";
 import {Trans} from "react-i18next";
 import styles from "./styles.scss";
 import mailtrainConfig from 'mailtrainConfig';
@@ -27,7 +21,7 @@ export function getMailerTypes(t) {
         const initVals = mailerTypes[mailerType].initData();
 
         for (const key in initVals) {
-            if (!mutStateData.hasIn([key])) {
+            if (!mutStateData.hasIn([key, 'value']) || mutStateData.getIn([key, 'value']) === undefined) {
                 mutStateData.setIn([key, 'value'], initVals[key]);
             }
         }
@@ -297,7 +291,7 @@ export function getMailerTypes(t) {
                 <Fieldset label={t('mailerSettings')}>
                     <Dropdown id="mailer_type" label={t('mailerType')} options={typeOptions}/>
                     <InputField id="sesKey" label={t('accessKey')} placeholder={t('awsAccessKeyId')}/>
-                    <InputField id="sesSecret" label={t('port')} placeholder={t('awsSecretAccessKey')}/>
+                    <InputField id="sesSecret" label={t('accessSecret')} placeholder={t('awsSecretAccessKey')} type="password"/>
                     <Dropdown id="sesRegion" label={t('region')} options={sesRegionOptions}/>
                 </Fieldset>
                 <Fieldset label={t('advancedMailerSettings')}>

@@ -1,6 +1,6 @@
 'use strict';
 
-const fork = require('child_process').fork;
+const fork = require('./fork').fork;
 const log = require('./log');
 const path = require('path');
 const knex = require('./knex');
@@ -15,6 +15,7 @@ function spawn(callback) {
     log.verbose('Senders', 'Spawning master sender process');
 
     knex('campaigns').where('status', CampaignStatus.SENDING).update({status: CampaignStatus.SCHEDULED})
+    .then(() => knex('campaigns').where('status', CampaignStatus.PAUSING).update({status: CampaignStatus.PAUSED}))
     .then(() => {
         senderProcess = fork(path.join(__dirname, '..', 'services', 'sender-master.js'), [], {
             cwd: path.join(__dirname, '..'),

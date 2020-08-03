@@ -2,6 +2,7 @@
 
 import React, {Component} from 'react';
 import PropTypes from 'prop-types';
+import {Trans} from 'react-i18next';
 import {withTranslation} from '../lib/i18n';
 import {LinkButton, requiresAuthenticatedUser, Title, withPageHelpers} from '../lib/page'
 import {
@@ -9,23 +10,25 @@ import {
     ButtonRow,
     CheckBox,
     Dropdown,
+    filterData,
     Form,
     FormSendMethod,
     InputField,
     StaticField,
     TableSelect,
     TextArea,
-    withForm
+    withForm,
+    withFormErrorHandlers
 } from '../lib/form';
 import {withErrorHandling} from '../lib/error-handling';
-import {NamespaceSelect, validateNamespace} from '../lib/namespace';
+import {getDefaultNamespace, NamespaceSelect, validateNamespace} from '../lib/namespace';
 import {ContentModalDialog, DeleteModalDialog} from "../lib/modals";
 import mailtrainConfig from 'mailtrainConfig';
-import {getEditForm, getTemplateTypes, getTypeForm} from './helpers';
+import {getEditForm, getTagLanguages, getTemplateTypes, getTypeForm} from './helpers';
 import axios from '../lib/axios';
 import styles from "../lib/styles.scss";
 import {getUrl} from "../lib/urls";
-import {TestSendModalDialog} from "./TestSendModalDialog";
+import {TestSendModalDialog, TestSendModalDialogMode} from "../campaigns/TestSendModalDialog";
 import {withComponentMixins} from "../lib/decorator-helpers";
 import moment from 'moment';
 
@@ -42,6 +45,7 @@ export default class CUD extends Component {
         super(props);
 
         this.templateTypes = getTemplateTypes(props.t);
+        this.tagLanguages = getTagLanguages(props.t);
 
         this.state = {
             showMergeTagReference: false,
@@ -53,8 +57,11 @@ export default class CUD extends Component {
         };
 
         this.initForm({
+            leaveConfirmation: !props.entity || props.entity.permissions.includes('edit'),
+            getPreSubmitUpdater: ::this.getPreSubmitFormValuesUpdater,
             onChangeBeforeValidation: {
-                type: ::this.onTypeChanged
+                type: ::this.onTypeChanged,
+                tag_language: ::this.onTagLanguageChanged
             }
         });
 
@@ -70,6 +77,7 @@ export default class CUD extends Component {
         action: PropTypes.string.isRequired,
         wizard: PropTypes.string,
         entity: PropTypes.object,
+        permissions: PropTypes.object,
         setPanelInFullScreen: PropTypes.func
     }
 
@@ -79,23 +87,56 @@ export default class CUD extends Component {
         }
     }
 
+    onTagLanguageChanged(mutStateData, key, oldTagLanguage, tagLanguage) {
+        if (tagLanguage) {
+            const isEdit = !!this.props.entity;
+            const type = mutStateData.getIn(['type', 'value']);
+            this.templateTypes[type].afterTagLanguageChange(mutStateData, isEdit);
+        }
+    }
+
     getFormValuesMutator(data) {
         this.templateTypes[data.type].afterLoad(data);
     }
 
+    submitFormValuesMutator(data) {
+        if (data.fromExistingEntity) {
+            return filterData(data, ['name', 'description', 'namespace', 'fromExistingEntity', 'existingEntity']);
+
+        } else {
+            this.templateTypes[data.type].beforeSave(data);
+            return filterData(data, ['name', 'description', 'type', 'tag_language', 'data', 'html', 'text', 'namespace', 'fromExistingEntity']);
+        }
+    }
+
+    async getPreSubmitFormValuesUpdater() {
+        let exportedData = {};
+        if (this.props.entity) {
+            const typeKey = this.getFormValue('type');
+            exportedData = await this.templateTypes[typeKey].exportHTMLEditorData(this);
+        }
+
+        return mutStateData => {
+            for (const key in exportedData) {
+                mutStateData.setIn([key, 'value'], exportedData[key]);
+            }
+        };
+    }
+
     componentDidMount() {
         if (this.props.entity) {
-            this.getFormValuesFromEntity(this.props.entity, ::this.getFormValuesMutator);
+            this.getFormValuesFromEntity(this.props.entity);
 
         } else {
             this.populateFormValues({
                 name: '',
                 description: '',
-                namespace: mailtrainConfig.user.namespace,
+                namespace: getDefaultNamespace(this.props.permissions),
                 type: mailtrainConfig.editors[0],
+                tag_language: mailtrainConfig.tagLanguages[0],
 
-                fromSourceTemplate: false,
-                sourceTemplate: null,
+                fromExistingEntity: false,
+                existingEntity: null,
 
                 text: '',
                 html: '',
@@ -116,21 +157,28 @@ export default class CUD extends Component {
             state.setIn(['name', 'error'], t('nameMustNotBeEmpty'));
         }
 
-        const typeKey = state.getIn(['type', 'value']);
-        if (!typeKey) {
-            state.setIn(['type', 'error'], t('typeMustBeSelected'));
-        }
-
-        if (state.getIn(['fromSourceTemplate', 'value']) && !state.getIn(['sourceTemplate', 'value'])) {
-            state.setIn(['sourceTemplate', 'error'], t('Source template must not be empty'));
-        } else {
-            state.setIn(['sourceTemplate', 'error'], null);
-        }
-
         validateNamespace(t, state);
 
-        if (typeKey) {
-            this.templateTypes[typeKey].validate(state);
+        const fromExistingEntity = state.getIn(['fromExistingEntity', 'value']);
+
+        if (fromExistingEntity) {
+            if (!state.getIn(['existingEntity', 'value'])) {
+                state.setIn(['existingEntity', 'error'], t('sourceTemplateMustNotBeEmpty'));
+            }
+
+        } else {
+            const typeKey = state.getIn(['type', 'value']);
+            if (!typeKey) {
+                state.setIn(['type', 'error'], t('typeMustBeSelected'));
+            }
+
+            if (!state.getIn(['tag_language', 'value'])) {
+                state.setIn(['tag_language', 'error'], t('tagLanguageMustBeSelected'));
+            }
+
+            if (typeKey) {
+                this.templateTypes[typeKey].validate(state);
+            }
         }
     }
 
@@ -138,14 +186,9 @@ export default class CUD extends Component {
         await this.submitHandler();
     }
 
+    @withFormErrorHandlers
     async submitHandler(submitAndLeave) {
         const t = this.props.t;
-
-        let exportedData = {};
-        if (this.props.entity) {
-            const typeKey = this.getFormValue('type');
-            exportedData = await this.templateTypes[typeKey].exportHTMLEditorData(this);
-        }
 
         let sendMethod, url;
         if (this.props.entity) {
@@ -159,25 +202,22 @@ export default class CUD extends Component {
         this.disableForm();
         this.setFormStatusMessage('info', t('saving'));
 
-        const submitResult = await this.validateAndSendFormValuesToURL(sendMethod, url, data => {
-            Object.assign(data, exportedData);
-            this.templateTypes[data.type].beforeSave(data);
-        });
+        const submitResult = await this.validateAndSendFormValuesToURL(sendMethod, url);
 
         if (submitResult) {
             if (this.props.entity) {
                 if (submitAndLeave) {
-                    this.navigateToWithFlashMessage('/templates', 'success', t('Template updated'));
+                    this.navigateToWithFlashMessage('/templates', 'success', t('templateUpdated'));
                 } else {
-                    await this.getFormValuesFromURL(`rest/templates/${this.props.entity.id}`, ::this.getFormValuesMutator);
+                    await this.getFormValuesFromURL(`rest/templates/${this.props.entity.id}`);
                     this.enableForm();
-                    this.setFormStatusMessage('success', t('Template updated'));
+                    this.setFormStatusMessage('success', t('templateUpdated'));
                 }
             } else {
                 if (submitAndLeave) {
-                    this.navigateToWithFlashMessage('/templates', 'success', t('Template created'));
+                    this.navigateToWithFlashMessage('/templates', 'success', t('templateCreated'));
                 } else {
-                    this.navigateToWithFlashMessage(`/templates/${submitResult}/edit`, 'success', t('Template created'));
+                    this.navigateToWithFlashMessage(`/templates/${submitResult}/edit`, 'success', t('templateCreated'));
                 }
             }
         } else {
@@ -233,7 +273,8 @@ export default class CUD extends Component {
 
         return {
             html: exportedData.html,
-            text: this.getFormValue('text')
+            text: this.getFormValue('text'),
+            tagLanguage: this.getFormValue('tag_language')
         };
     }
 
@@ -253,11 +294,17 @@ export default class CUD extends Component {
     render() {
         const t = this.props.t;
         const isEdit = !!this.props.entity;
+        const canModify = !isEdit || this.props.entity.permissions.includes('edit');
         const canDelete = isEdit && this.props.entity.permissions.includes('delete');
 
         const typeOptions = [];
         for (const key of mailtrainConfig.editors) {
             typeOptions.push({key, label: this.templateTypes[key].typeName});
+        }
+
+        const tagLanguageOptions = [];
+        for (const key of mailtrainConfig.tagLanguages) {
+            tagLanguageOptions.push({key, label: this.tagLanguages[key].name});
         }
 
         const typeKey = this.getFormValue('type');
@@ -276,17 +323,21 @@ export default class CUD extends Component {
             { data: 1, title: t('name') },
             { data: 2, title: t('description') },
             { data: 3, title: t('type'), render: data => this.templateTypes[data].typeName },
-            { data: 4, title: t('created'), render: data => moment(data).fromNow() },
-            { data: 5, title: t('namespace') },
+            { data: 4, title: t('tagLanguage'), render: data => this.tagLanguages[data].name },
+            { data: 5, title: t('created'), render: data => moment(data).fromNow() },
+            { data: 6, title: t('namespace') },
         ];
 
         return (
             <div className={this.state.elementInFullscreen ? styles.withElementInFullscreen : ''}>
                 {isEdit &&
                     <TestSendModalDialog
+                        mode={TestSendModalDialogMode.TEMPLATE}
                         visible={this.state.showTestSendModal}
                         onHide={() => this.setState({showTestSendModal: false})}
-                        getDataAsync={this.sendModalGetDataHandler}/>
+                        getDataAsync={this.sendModalGetDataHandler}
+                        template={this.props.entity}
+                    />
                 }
                 {isEdit &&
                     <ContentModalDialog
@@ -308,16 +359,22 @@ export default class CUD extends Component {
 
                 <Title>{isEdit ? t('editTemplate') : t('createTemplate')}</Title>
 
+                {!canModify &&
+                    <div className="alert alert-warning" role="alert">
+                        <Trans><b>Warning!</b> You do not have necessary permissions to edit this template. Any changes that you perform here will be lost.</Trans>
+                    </div>
+                }
+
                 <Form stateOwner={this} onSubmitAsync={::this.submitHandler}>
                     <InputField id="name" label={t('name')}/>
                     <TextArea id="description" label={t('description')}/>
 
                     {!isEdit &&
-                        <CheckBox id="fromSourceTemplate" label={t('template')} text={t('Clone from an existing template')}/>
+                        <CheckBox id="fromExistingEntity" label={t('template')} text={t('cloneFromAnExistingTemplate')}/>
                     }
 
-                    {this.getFormValue('fromSourceTemplate') ?
-                        <TableSelect key="templateSelect" id="sourceTemplate" withHeader dropdown dataUrl='rest/templates-table' columns={templatesColumns} selectionLabelIndex={1} />
+                    {this.getFormValue('fromExistingEntity') ?
+                        <TableSelect id="existingEntity" label={t('Source template')} withHeader dropdown dataUrl='rest/templates-table' columns={templatesColumns} selectionLabelIndex={1} />
                     :
                         <>
                             {isEdit ?
@@ -329,6 +386,8 @@ export default class CUD extends Component {
                             }
 
                             {typeForm}
+
+                            <Dropdown id="tag_language" label={t('tagLanguage')} options={tagLanguageOptions} disabled={isEdit}/>
                         </>
                     }
 
@@ -337,8 +396,12 @@ export default class CUD extends Component {
                     {editForm}
 
                     <ButtonRow>
-                        <Button type="submit" className="btn-primary" icon="check" label={t('Save')}/>
-                        {isEdit && <Button type="submit" className="btn-primary" icon="check" label={t('Save and leave')} onClickAsync={async () => this.submitHandler(true)}/>}
+                        {canModify &&
+                            <>
+                                <Button type="submit" className="btn-primary" icon="check" label={t('save')}/>
+                                {isEdit && <Button type="submit" className="btn-primary" icon="check" label={t('saveAndLeave')} onClickAsync={async () => await this.submitHandler(true)}/>}
+                            </>
+                        }
                         {canDelete && <LinkButton className="btn-danger" icon="trash-alt" label={t('delete')} to={`/templates/${this.props.entity.id}/delete`}/> }
                         {isEdit && <Button className="btn-success" icon="at" label={t('testSend')} onClickAsync={async () => this.setState({showTestSendModal: true})}/> }
                     </ButtonRow>

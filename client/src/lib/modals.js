@@ -89,8 +89,8 @@ export class RestActionModalDialog extends Component {
         const t = this.props.t;
 
         return (
-            <ModalDialog hidden={!this.props.visible} title={this.props.title} onCloseAsync={() => this.hideModal(true)} buttons={[
-                { label: t('no'), className: 'btn-primary', onClickAsync: async () => this.hideModal(true) },
+            <ModalDialog hidden={!this.props.visible} title={this.props.title} onCloseAsync={async () => await this.hideModal(true)} buttons={[
+                { label: t('no'), className: 'btn-primary', onClickAsync: async () => await this.hideModal(true) },
                 { label: t('yes'), className: 'btn-danger', onClickAsync: ::this.performAction }
             ]}>
                 {this.props.message}
@@ -108,22 +108,30 @@ const entityTypeLabels = {
     'sendConfiguration': t => t('sendConfiguration'),
     'report': t => t('report'),
     'reportTemplate': t => t('reportTemplate'),
-    'mosaicoTemplate': t => t('mosaicoTemplate')
+    'mosaicoTemplate': t => t('mosaicoTemplate'),
+    'user': t => t('User')
 };
 
 function _getDependencyErrorMessage(err, t, name) {
     return (
         <div>
-            <p>{t('cannoteDeleteNameDueToTheFollowing', {name})}</p>
-            <ul className={styles.errorsList}>
-                {err.data.dependencies.map(dep =>
-                    dep.link ?
-                        <li key={dep.link}><Link to={dep.link}>{entityTypeLabels[dep.entityTypeId](t)}: {dep.name}</Link></li>
-                        : // if no dep.link is present, it means the user has no permission to view the entity, thus only id without the link is shown
-                        <li key={dep.id}>{entityTypeLabels[dep.entityTypeId](t)}: [{dep.id}]</li>
-                )}
-                {err.data.andMore && <li>{t('andMore')}</li>}
-            </ul>
+            {err.data.dependencies.length > 0 ?
+                <>
+                    <p>{t('cannoteDeleteNameDueToTheFollowing', {name})}</p>
+                    <ul className={styles.errorsList}>
+                        {err.data.dependencies.map(dep =>
+                            dep.link ?
+                                <li key={dep.link}><Link
+                                    to={dep.link}>{entityTypeLabels[dep.entityTypeId](t)}: {dep.name}</Link></li>
+                                : // if no dep.link is present, it means the user has no permission to view the entity, thus only id without the link is shown
+                                <li key={dep.id}>{entityTypeLabels[dep.entityTypeId](t)}: [{dep.id}]</li>
+                        )}
+                        {err.data.andMore && <li>{t('andMore')}</li>}
+                    </ul>
+                </>
+            :
+                <p>{t('Cannot delete {{name}} due to hidden dependencies', {name})}</p>
+            }
         </div>
     );
 }
@@ -143,10 +151,11 @@ export class DeleteModalDialog extends Component {
         visible: PropTypes.bool.isRequired,
         stateOwner: PropTypes.object.isRequired,
         deleteUrl: PropTypes.string.isRequired,
-        backUrl: PropTypes.string,
-        successUrl: PropTypes.string,
+        backUrl: PropTypes.string.isRequired,
+        successUrl: PropTypes.string.isRequired,
         deletingMsg:  PropTypes.string.isRequired,
-        deletedMsg:  PropTypes.string.isRequired
+        deletedMsg:  PropTypes.string.isRequired,
+        name: PropTypes.string
     }
 
     async onErrorAsync(err) {
@@ -171,7 +180,7 @@ export class DeleteModalDialog extends Component {
     render() {
         const t = this.props.t;
         const owner = this.props.stateOwner;
-        const name = owner.getFormValue('name') || '';
+        const name = this.props.name || owner.getFormValue('name') || '';
 
         return <RestActionModalDialog
             title={t('confirmDeletion')}
@@ -197,10 +206,22 @@ export function tableRestActionDialogInit(owner) {
 
 
 function _hide(owner, dontRefresh = false) {
-    owner.tableRestActionDialogData = {};
+    const refreshTables = owner.tableRestActionDialogData.refreshTables;
+
     owner.setState({ tableRestActionDialogShown: false });
+
     if (!dontRefresh) {
-        owner.table.refresh();
+        owner.tableRestActionDialogData = {};
+
+        if (refreshTables) {
+            refreshTables();
+        } else {
+            owner.table.refresh();
+        }
+    } else {
+        // _hide is called twice: (1) at performing action, and at (2) success. Here we keep the refreshTables
+        // reference till it is really needed in step #2.
+        owner.tableRestActionDialogData = { refreshTables };
     }
 }
 
@@ -268,14 +289,19 @@ export function tableAddRestActionButton(actions, owner, action, button, title, 
                     actionData: action.data,
                     actionInProgressMsg: actionInProgressMsg,
                     actionDoneMsg: actionDoneMsg,
-                    onErrorAsync: onErrorAsync
+                    onErrorAsync: onErrorAsync,
+                    refreshTables: action.refreshTables
                 };
 
                 owner.setState({
                     tableRestActionDialogShown: true
                 });
 
-                owner.table.refresh();
+                if (action.refreshTables) {
+                    action.refreshTables();
+                } else {
+                    owner.table.refresh();
+                }
             }
         });
     }

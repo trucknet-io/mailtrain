@@ -1,6 +1,6 @@
 'use strict';
 
-const config = require('config');
+const config = require('./config');
 const log = require('./log');
 const util = require('util');
 
@@ -20,20 +20,21 @@ let authMode = 'local';
 let LdapStrategy;
 let ldapStrategyOpts;
 if (config.ldap.enabled) {
-    if (!config.ldap.method || config.ldap.method == 'ldapjs') {
+    const ldapProtocol = config.ldap.secure ? 'ldaps' : 'ldap';
+    if (!config.ldap.method || config.ldap.method === 'ldapjs') {
         try {
             LdapStrategy = require('passport-ldapjs').Strategy; // eslint-disable-line global-require
-            authMode = 'ldapjs';
+            authMode = 'ldap';
             log.info('LDAP', 'Found module "passport-ldapjs". It will be used for LDAP auth.');
 
             ldapStrategyOpts = {
                 server: {
-                    url: 'ldap://' + config.ldap.host + ':' + config.ldap.port
+                    url: ldapProtocol + '://' + config.ldap.host + ':' + config.ldap.port
                 },
                 base: config.ldap.baseDN,
                 search: {
                     filter: config.ldap.filter,
-                    attributes: [config.ldap.uidTag, config.ldap.nameTag, 'mail'],
+                    attributes: [config.ldap.uidTag, config.ldap.nameTag, config.ldap.mailTag],
                     scope: 'sub'
                 },
                 uidTag: config.ldap.uidTag,
@@ -46,7 +47,7 @@ if (config.ldap.enabled) {
         }
     }
 
-    if (!LdapStrategy && (!config.ldap.method || config.ldap.method == 'ldapauth')) {
+    if (!LdapStrategy && (!config.ldap.method || config.ldap.method === 'ldapauth')) {
         try {
             LdapStrategy = require('passport-ldapauth').Strategy; // eslint-disable-line global-require
             authMode = 'ldapauth';
@@ -54,10 +55,10 @@ if (config.ldap.enabled) {
 
             ldapStrategyOpts = {
                 server: {
-                    url: 'ldap://' + config.ldap.host + ':' + config.ldap.port,
+                    url: ldapProtocol + '://' + config.ldap.host + ':' + config.ldap.port,
                     searchBase: config.ldap.baseDN,
                     searchFilter: config.ldap.filter,
-                    searchAttributes: [config.ldap.uidTag, config.ldap.nameTag, 'mail'],
+                    searchAttributes: [config.ldap.uidTag, config.ldap.nameTag, config.ldap.mailTag],
                     bindDN: config.ldap.bindUser,
                     bindCredentials: config.ldap.bindPassword
                 },
@@ -176,7 +177,7 @@ module.exports.restLogin = (req, res, next) => {
 };
 
 if (LdapStrategy) {
-    log.info('Using LDAP auth (passport-' + authMode + ')');
+    log.info('Using LDAP auth (passport-' + authMode === 'ldap' ? 'ldapjs' : authMode + ')');
     module.exports.authMethod = 'ldap';
     module.exports.isAuthMethodLocal = false;
 
@@ -186,15 +187,15 @@ if (LdapStrategy) {
 
             return {
                 id: user.id,
-                username: user.username,
+                username: profile[config.ldap.uidTag],
                 name: profile[config.ldap.nameTag],
-                email: profile.mail,
+                email: profile[config.ldap.mailTag],
                 role: user.role
             };
 
         } catch (err) {
             if (err instanceof interoperableErrors.NotFoundError) {
-                const userId = await users.create(null, {
+                const userId = await users.create(contextHelpers.getAdminContext(), {
                     username: profile[config.ldap.uidTag],
                     role: config.ldap.newUserRole,
                     namespace: config.ldap.newUserNamespaceId
@@ -204,7 +205,7 @@ if (LdapStrategy) {
                     id: userId,
                     username: profile[config.ldap.uidTag],
                     name: profile[config.ldap.nameTag],
-                    email: profile.mail,
+                    email: profile[config.ldap.mailTag],
                     role: config.ldap.newUserRole
                 };
             } else {

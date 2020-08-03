@@ -1,35 +1,25 @@
 'use strict';
 
 import React, {Component} from 'react';
-import PropTypes
-    from 'prop-types';
+import PropTypes from 'prop-types';
 import {withTranslation} from '../lib/i18n';
-import {
-    LinkButton,
-    requiresAuthenticatedUser,
-    Title,
-    withPageHelpers
-} from '../lib/page';
+import {LinkButton, requiresAuthenticatedUser, Title, withPageHelpers} from '../lib/page';
 import {
     Button,
     ButtonRow,
+    filterData,
     Form,
     FormSendMethod,
     InputField,
     TableSelect,
-    withForm
+    withForm,
+    withFormErrorHandlers
 } from '../lib/form';
 import {withErrorHandling} from '../lib/error-handling';
-import interoperableErrors
-    from '../../../shared/interoperable-errors';
-import passwordValidator
-    from '../../../shared/password-validator';
-import mailtrainConfig
-    from 'mailtrainConfig';
-import {
-    NamespaceSelect,
-    validateNamespace
-} from '../lib/namespace';
+import interoperableErrors from '../../../shared/interoperable-errors';
+import passwordValidator from '../../../shared/password-validator';
+import mailtrainConfig from 'mailtrainConfig';
+import {getDefaultNamespace, NamespaceSelect, validateNamespace} from '../lib/namespace';
 import {DeleteModalDialog} from "../lib/modals";
 import {withComponentMixins} from "../lib/decorator-helpers";
 
@@ -59,7 +49,8 @@ export default class CUD extends Component {
 
     static propTypes = {
         action: PropTypes.string.isRequired,
-        entity: PropTypes.object
+        entity: PropTypes.object,
+        permissions: PropTypes.object
     }
 
     getFormValuesMutator(data) {
@@ -67,9 +58,13 @@ export default class CUD extends Component {
         data.password2 = '';
     }
 
+    submitFormValuesMutator(data) {
+        return filterData(data, ['username', 'name', 'email', 'password', 'namespace', 'role']);
+    }
+
     componentDidMount() {
         if (this.props.entity) {
-            this.getFormValuesFromEntity(this.props.entity, ::this.getFormValuesMutator);
+            this.getFormValuesFromEntity(this.props.entity);
         } else {
             this.populateFormValues({
                 username: '',
@@ -77,7 +72,8 @@ export default class CUD extends Component {
                 email: '',
                 password: '',
                 password2: '',
-                namespace: mailtrainConfig.user.namespace
+                namespace: getDefaultNamespace(this.props.permissions),
+                role: null
             });
         }
     }
@@ -94,7 +90,7 @@ export default class CUD extends Component {
         } else if (usernameServerValidation && usernameServerValidation.exists) {
             state.setIn(['username', 'error'], t('theUserNameAlreadyExistsInTheSystem'));
         } else if (!usernameServerValidation) {
-            state.setIn(['email', 'error'], t('validationIsInProgress'));
+            state.setIn(['username', 'error'], t('validationIsInProgress'));
         } else {
             state.setIn(['username', 'error'], null);
         }
@@ -158,6 +154,7 @@ export default class CUD extends Component {
         validateNamespace(t, state);
     }
 
+    @withFormErrorHandlers
     async submitHandler(submitAndLeave) {
         const t = this.props.t;
 
@@ -174,24 +171,22 @@ export default class CUD extends Component {
             this.disableForm();
             this.setFormStatusMessage('info', t('saving'));
 
-            const submitResult = await this.validateAndSendFormValuesToURL(sendMethod, url, data => {
-                delete data.password2;
-            });
+            const submitResult = await this.validateAndSendFormValuesToURL(sendMethod, url);
 
             if (submitResult) {
                 if (this.props.entity) {
                     if (submitAndLeave) {
-                        this.navigateToWithFlashMessage('/users', 'success', t('User updated'));
+                        this.navigateToWithFlashMessage('/users', 'success', t('userUpdated'));
                     } else {
-                        await this.getFormValuesFromURL(`rest/users/${this.props.entity.id}`, ::this.getFormValuesMutator);
+                        await this.getFormValuesFromURL(`rest/users/${this.props.entity.id}`);
                         this.enableForm();
-                        this.setFormStatusMessage('success', t('User updated'));
+                        this.setFormStatusMessage('success', t('userUpdated'));
                     }
                 } else {
                     if (submitAndLeave) {
-                        this.navigateToWithFlashMessage('/users', 'success', t('User created'));
+                        this.navigateToWithFlashMessage('/users', 'success', t('userCreated'));
                     } else {
-                        this.navigateToWithFlashMessage(`/users/${submitResult}/edit`, 'success', t('User created'));
+                        this.navigateToWithFlashMessage(`/users/${submitResult}/edit`, 'success', t('userCreated'));
                     }
                 }
             } else {
@@ -264,8 +259,8 @@ export default class CUD extends Component {
                     <NamespaceSelect/>
 
                     <ButtonRow>
-                        <Button type="submit" className="btn-primary" icon="check" label={t('Save')}/>
-                        <Button type="submit" className="btn-primary" icon="check" label={t('Save and leave')} onClickAsync={async () => this.submitHandler(true)}/>
+                        <Button type="submit" className="btn-primary" icon="check" label={t('save')}/>
+                        <Button type="submit" className="btn-primary" icon="check" label={t('saveAndLeave')} onClickAsync={async () => await this.submitHandler(true)}/>
                         {canDelete && <LinkButton className="btn-danger" icon="trash-alt" label={t('deleteUser')} to={`/users/${this.props.entity.id}/delete`}/>}
                     </ButtonRow>
                 </Form>

@@ -1,27 +1,13 @@
 'use strict';
 
 import React, {Component} from "react";
-import PropTypes
-    from "prop-types";
+import PropTypes from "prop-types";
 import {withTranslation} from './i18n';
-import {
-    requiresAuthenticatedUser,
-    withPageHelpers
-} from "./page";
-import {
-    withAsyncErrorHandler,
-    withErrorHandling
-} from "./error-handling";
-import axios
-    from "./axios";
-import styles
-    from "./styles.scss";
-import {
-    getSandboxUrl,
-    getTrustedUrl,
-    getUrl,
-    setRestrictedAccessToken
-} from "./urls";
+import {requiresAuthenticatedUser, withPageHelpers} from "./page";
+import {withAsyncErrorHandler, withErrorHandling} from "./error-handling";
+import axios from "./axios";
+import styles from "./styles.scss";
+import {getSandboxUrl, getUrl, setRestrictedAccessToken} from "./urls";
 import {withComponentMixins} from "./decorator-helpers";
 
 @withComponentMixins([
@@ -46,6 +32,8 @@ export class UntrustedContentHost extends Component {
 
         this.rpcCounter = 0;
         this.rpcResolves = new Map();
+
+        this.unmounted = false;
     }
 
     static propTypes = {
@@ -125,7 +113,7 @@ export class UntrustedContentHost extends Component {
 
             this.accessToken = result.data;
 
-            if (!this.state.hasAccessToken) {
+            if (!this.state.hasAccessToken && !this.unmounted) {
                 this.setState({
                     hasAccessToken: true
                 })
@@ -166,6 +154,7 @@ export class UntrustedContentHost extends Component {
     }
 
     componentWillUnmount() {
+        this.unmounted = true;
         clearTimeout(this.refreshAccessTokenTimeout);
         window.removeEventListener('message', this.receiveMessageHandler, false);
     }
@@ -258,7 +247,7 @@ export class UntrustedContentRoot extends Component {
         } else {
             return (
                 <div className="sandbox-loading-message">
-                    {t('loading-1')}
+                    {t('loading')}
                 </div>
             );
         }

@@ -2,16 +2,15 @@
 
 import React, {Component} from 'react';
 import {withTranslation} from './i18n';
-import PropTypes
-    from "prop-types";
-import styles
-    from "./sandboxed-grapesjs.scss";
+import PropTypes from "prop-types";
+import styles from "./sandboxed-grapesjs.scss";
 
 import {UntrustedContentHost} from './untrusted';
 import {Icon} from "./bootstrap-components";
 import {getTrustedUrl} from "./urls";
 import {withComponentMixins} from "./decorator-helpers";
 import {GrapesJSSourceType} from "./sandboxed-grapesjs-shared";
+import {getTagLanguageFromEntity} from "./sandbox-common";
 
 @withComponentMixins([
     withTranslation
@@ -59,6 +58,7 @@ export class GrapesJSHost extends Component {
         const editorData = {
             entityTypeId: this.props.entityTypeId,
             entityId: this.props.entity.id,
+            tagLanguage: getTagLanguageFromEntity(this.props.entity, this.props.entityTypeId),
             initialSource: this.props.initialSource,
             initialStyle: this.props.initialStyle,
             sourceType: this.props.sourceType
@@ -77,11 +77,11 @@ export class GrapesJSHost extends Component {
                         <div className={styles.title}>{this.props.title}</div>
                     </div>
                     <div className={styles.navbarRight}>
-                        {this.props.canSave ? <a className={styles.btn} onClick={this.props.onSave} title={t('Save')}><Icon icon="save"/></a> : <span className={styles.btnDisabled}><Icon icon="save"/></span>}
-                        <a className={styles.btn} onClick={this.props.onTestSend} title={t('Send test e-mail')}><Icon icon="at"/></a>
-                        <a className={styles.btn} onClick={() => this.props.onShowExport('html', 'HTML')} title={t('Show HTML')}><Icon icon="file-code"/></a>
-                        {this.props.sourceType === GrapesJSSourceType.MJML && <a className={styles.btn} onClick={() => this.props.onShowExport('mjml', 'MJML')} title={t('Show MJML')}>MJML</a>}
-                        <a className={styles.btn} onClick={::this.toggleFullscreenAsync} title={t('Maximize editor')}><Icon icon="window-maximize"/></a>
+                        {this.props.canSave ? <a className={styles.btn} onClick={this.props.onSave} title={t('save')}><Icon icon="save"/></a> : <span className={styles.btnDisabled}><Icon icon="save"/></span>}
+                        <a className={styles.btn} onClick={this.props.onTestSend} title={t('sendTestEmail-1')}><Icon icon="at"/></a>
+                        <a className={styles.btn} onClick={() => this.props.onShowExport('html', 'HTML')} title={t('showHtml')}><Icon icon="file-code"/></a>
+                        {this.props.sourceType === GrapesJSSourceType.MJML && <a className={styles.btn} onClick={() => this.props.onShowExport('mjml', 'MJML')} title={t('showMjml')}>MJML</a>}
+                        <a className={styles.btn} onClick={::this.toggleFullscreenAsync} title={t('maximizeEditor')}><Icon icon="window-maximize"/></a>
                     </div>
                 </div>
                 <UntrustedContentHost ref={this.contentNodeRefHandler} className={styles.host} singleToken={true} contentProps={editorData} contentSrc="grapesjs/editor" tokenMethod="grapesjs" tokenParams={tokenData}/>

@@ -4,7 +4,7 @@
 
 ![](http://mailtrain.org/mailtrain.png)
 
-FIXME: The info below needs to be updated !!!
+# FIXME: The info below needs to be updated to v2 !!!
 
 
 ## Features
@@ -115,6 +115,8 @@ If you do not use VERP with ZoneMTA then you should get notified most of the bou
 ##### 6. Set up proper PTR record
 
 If you are using the bundled ZoneMTA then you should make sure you are using a proper PTR record for your server. For example if you use DigitalOcean then PTR is set automatically (it's the droplet name, so make sure your droplet name is the same as the domain name you are running Mailtrain from). If you use AWS then you can request setting up PTR records using [this form](https://portal.aws.amazon.com/gp/aws/html-forms-controller/contactus/ec2-email-limit-rdns-request) (requires authentication). Otherwise you would have to check from your service provider, hot to get the PTR record changed. Everything should work without the PTR record but setting it up correctly improves the deliverability a lot.
+
+If you are using the builtin Zone-MTA, make sure the configured pool name matches the PTR record.
 
 ##### 7. Ready to send!
 
@@ -232,21 +234,21 @@ Edit [mailtrain.conf](setup/mailtrain.conf) (update application folder) and copy
 
 The (experimental) Mailtrain Subscription Widget allows you to embed your sign-up forms on your website. To embed a Widget, you need to:
 
-Enable cross-origin resource sharing in your `config` file and whitelist your site:
+Enable cross-origin resource sharing in your `server/config/local.yaml` file (you may need to create it if it doesn't exist) and whitelist your site:
 
 ```
-[cors]
-# Allow subscription widgets to be embedded
-origins=['https://www.example.com']
+cors:
+  # Allow subscription widgets to be embedded
+  origins=['https://www.example.com']
 ```
 
-Embed the widget code on your website:
+Embed the widget code on your website using the untrusted endpoint:
 
 ```
-<div data-mailtrain-subscription-widget data-url="http://domain/subscription/Byf44R-og/widget">
-    <a href="http://domain/subscription/Byf44R-og">Subscribe to our list</a>
+<div data-mailtrain-subscription-widget data-url="http://lists.example.com/subscription/Byf44R-og/widget">
+    <a href="http://lists.example.com/subscription/Byf44R-og">Subscribe to our list</a>
 </div>
-<script src="http://domain/subscription/widget.js"></script>
+<script src="http://lists.example.com/static/subscription/widget.js"></script>
 ```
 
 ## Cloudron
@@ -266,7 +268,7 @@ Mailtrain uses webhooks integration to detect bounces and spam complaints. Curre
   * **SendGrid** – use `http://domain/webhooks/sendgrid` as the webhook URL for bounces and complaints ([instructions](https://github.com/Mailtrain-org/mailtrain/wiki/Setting-up-Webhooks-for-SendGrid))
   * **Mailgun** – use `http://domain/webhooks/mailgun` as the webhook URL for bounces and complaints ([instructions](https://github.com/Mailtrain-org/mailtrain/wiki/Setting-up-Webhooks-for-Mailgun))
   * **ZoneMTA** – use `http://domain/webhooks/zone-mta` as the webhook URL for bounces. If you install Mailtrain with the included installation script then this route gets set up automatically during the installation process
-  * **Postfix** – This is not a webhook but a TCP server on port 5699 to listen for piped Postfix logs. Enable it with the `[postfixbounce]` config option. To use it, pipe the log to that port using *tail*: `tail -F /var/log/mail.log | nc localhost 5699 -` (if Mailtrain restarts then you need to re-establish the *tail* pipe), alternatively you could send the log with a cron job periodically `tail -n 100 | nc localhost 5699 -`.
+  * **Postfix** – This is not a webhook but a TCP server on port 5699 to listen for piped Postfix logs. Enable it with the `[postfixBounce]` config option. To use it, pipe the log to that port using *tail*: `tail -F /var/log/mail.log | nc localhost 5699 -` (if Mailtrain restarts then you need to re-establish the *tail* pipe), alternatively you could send the log with a cron job periodically `tail -n 100 | nc localhost 5699 -`.
 
 Additionally Mailtrain (v1.1+) is able to use VERP-based bounce handling. This would require to have a compatible SMTP relay (the services mentioned above strip out or block VERP addresses in the SMTP envelope) and you also need to set up special MX DNS name that points to your Mailtrain installation server.
 

@@ -4,17 +4,16 @@ import './public-path';
 
 import React, {Component} from 'react';
 import ReactDOM from 'react-dom';
-import {I18nextProvider} from 'react-i18next';
-import i18n, {withTranslation} from './i18n';
+import {TranslationRoot, withTranslation} from './i18n';
 import {parentRPC, UntrustedContentRoot} from './untrusted';
 import PropTypes from "prop-types";
 import styles from "./sandboxed-codeeditor.scss";
 import {getPublicUrl, getSandboxUrl, getTrustedUrl} from "./urls";
 import {base, unbase} from "../../../shared/templates";
 import ACEEditorRaw from 'react-ace';
-import 'brace/theme/github';
-import 'brace/ext/searchbox';
-import 'brace/mode/html';
+import 'ace-builds/src-noconflict/theme-github';
+import 'ace-builds/src-noconflict/ext-searchbox';
+import 'ace-builds/src-noconflict/mode-html';
 import {CodeEditorSourceType} from "./sandboxed-codeeditor-shared";
 
 import mjml2html from "./mjml";
@@ -67,7 +66,7 @@ class CodeEditorSandbox extends Component {
         const trustedUrlBase = getTrustedUrl();
         const sandboxUrlBase = getSandboxUrl();
         const publicUrlBase = getPublicUrl();
-        const source = this.props.initialSource ? base(this.props.initialSource, trustedUrlBase, sandboxUrlBase, publicUrlBase) : defaultSource;
+        const source = this.props.initialSource ? base(this.props.initialSource, this.props.tagLanguage, trustedUrlBase, sandboxUrlBase, publicUrlBase) : defaultSource;
 
         this.state = {
             source,
@@ -88,6 +87,7 @@ class CodeEditorSandbox extends Component {
     static propTypes = {
         entityTypeId: PropTypes.string,
         entityId: PropTypes.number,
+        tagLanguage: PropTypes.string,
         initialSource: PropTypes.string,
         sourceType: PropTypes.string,
         initialPreview: PropTypes.bool,
@@ -99,8 +99,8 @@ class CodeEditorSandbox extends Component {
         const sandboxUrlBase = getSandboxUrl();
         const publicUrlBase = getPublicUrl();
         return {
-            html: unbase(this.getHtml(), trustedUrlBase, sandboxUrlBase, publicUrlBase, true),
-            source: unbase(this.state.source, trustedUrlBase, sandboxUrlBase, publicUrlBase, true)
+            html: unbase(this.getHtml(), this.props.tagLanguage, trustedUrlBase, sandboxUrlBase, publicUrlBase, true),
+            source: unbase(this.state.source, this.props.tagLanguage, trustedUrlBase, sandboxUrlBase, publicUrlBase, true)
         };
     }
 
@@ -150,7 +150,7 @@ class CodeEditorSandbox extends Component {
         });
 
         if (!this.refreshTimeoutId) {
-            this.refreshTimeoutId = setTimeout(() => this.refresh(), refreshTimeout);
+            this.refreshTimeoutId = setTimeout(this.refreshHandler, refreshTimeout);
         }
     }
 
@@ -211,9 +211,9 @@ export default function() {
     parentRPC.init();
 
     ReactDOM.render(
-        <I18nextProvider i18n={ i18n }>
+        <TranslationRoot>
             <UntrustedContentRoot render={props => <CodeEditorSandbox {...props} />} />
-        </I18nextProvider>,
+        </TranslationRoot>,
         document.getElementById('root')
     );
 };

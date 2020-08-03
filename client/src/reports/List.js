@@ -2,32 +2,17 @@
 
 import React, {Component} from 'react';
 import {withTranslation} from '../lib/i18n';
-import {
-    LinkButton,
-    requiresAuthenticatedUser,
-    Title,
-    Toolbar,
-    withPageHelpers
-} from '../lib/page';
+import {LinkButton, requiresAuthenticatedUser, Title, Toolbar, withPageHelpers} from '../lib/page';
 import {Table} from '../lib/table';
-import {
-    withAsyncErrorHandler,
-    withErrorHandling
-} from '../lib/error-handling';
-import moment
-    from 'moment';
-import axios
-    from '../lib/axios';
+import {withAsyncErrorHandler, withErrorHandling} from '../lib/error-handling';
+import moment from 'moment';
+import axios from '../lib/axios';
 import {ReportState} from '../../../shared/reports';
 import {Icon} from "../lib/bootstrap-components";
-import {checkPermissions} from "../lib/permissions";
 import {getUrl} from "../lib/urls";
-import {
-    tableAddDeleteButton,
-    tableRestActionDialogInit,
-    tableRestActionDialogRender
-} from "../lib/modals";
+import {tableAddDeleteButton, tableRestActionDialogInit, tableRestActionDialogRender} from "../lib/modals";
 import {withComponentMixins} from "../lib/decorator-helpers";
+import PropTypes from 'prop-types';
 
 @withComponentMixins([
     withTranslation,
@@ -43,36 +28,8 @@ export default class List extends Component {
         tableRestActionDialogInit(this);
     }
 
-    @withAsyncErrorHandler
-    async fetchPermissions() {
-        const result = await checkPermissions({
-            createReport: {
-                entityTypeId: 'namespace',
-                requiredOperations: ['createReport']
-            },
-            executeReportTemplate: {
-                entityTypeId: 'reportTemplate',
-                requiredOperations: ['execute']
-            },
-            createReportTemplate: {
-                entityTypeId: 'namespace',
-                requiredOperations: ['createReportTemplate']
-            },
-            viewReportTemplate: {
-                entityTypeId: 'reportTemplate',
-                requiredOperations: ['view']
-            }
-        });
-
-        this.setState({
-            createPermitted: result.data.createReport && result.data.executeReportTemplate,
-            templatesPermitted: result.data.createReportTemplate || result.data.viewReportTemplate
-        });
-    }
-
-    componentDidMount() {
-        // noinspection JSIgnoredPromiseFromCall
-        this.fetchPermissions();
+    static propTypes = {
+        permissions: PropTypes.object
     }
 
     @withAsyncErrorHandler
@@ -89,6 +46,10 @@ export default class List extends Component {
 
     render() {
         const t = this.props.t;
+
+        const permissions = this.props.permissions;
+        const createPermitted = permissions.createReport && permissions.executeReportTemplate;
+        const templatesPermitted = permissions.createReportTemplate || permissions.viewReportTemplate;
 
         const columns = [
             { data: 1, title: t('name') },
@@ -191,10 +152,10 @@ export default class List extends Component {
             <div>
                 {tableRestActionDialogRender(this)}
                 <Toolbar>
-                    {this.state.createPermitted &&
+                    {createPermitted &&
                         <LinkButton to="/reports/create" className="btn-primary" icon="plus" label={t('createReport')}/>
                     }
-                    {this.state.templatesPermitted &&
+                    {templatesPermitted &&
                         <LinkButton to="/reports/templates" className="btn-primary" label={t('reportTemplates')}/>
                     }
                 </Toolbar>

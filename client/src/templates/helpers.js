@@ -1,59 +1,45 @@
 'use strict';
 
-import React
-    from "react";
-import {
-    ACEEditor,
-    AlignedRow,
-    Dropdown,
-    StaticField,
-    TableSelect
-} from "../lib/form";
-import 'brace/mode/text';
-import 'brace/mode/html';
+import React from "react";
+import {ACEEditor, AlignedRow, Dropdown, StaticField, TableSelect} from "../lib/form";
+import 'ace-builds/src-noconflict/mode-text';
+import 'ace-builds/src-noconflict/mode-html';
 
 import {MosaicoHost} from "../lib/sandboxed-mosaico";
 import {CKEditorHost} from "../lib/sandboxed-ckeditor";
 import {GrapesJSHost} from "../lib/sandboxed-grapesjs";
 import {CodeEditorHost} from "../lib/sandboxed-codeeditor";
 
-import {
-    getGrapesJSSourceTypeOptions,
-    GrapesJSSourceType
-} from "../lib/sandboxed-grapesjs-shared";
+import {getGrapesJSSourceTypeOptions, GrapesJSSourceType} from "../lib/sandboxed-grapesjs-shared";
 
-import {
-    CodeEditorSourceType,
-    getCodeEditorSourceTypeOptions
-} from "../lib/sandboxed-codeeditor-shared";
+import {CodeEditorSourceType, getCodeEditorSourceTypeOptions} from "../lib/sandboxed-codeeditor-shared";
 
 import {getTemplateTypes as getMosaicoTemplateTypes} from './mosaico/helpers';
-import {
-    getPublicUrl,
-    getSandboxUrl,
-    getTrustedUrl
-} from "../lib/urls";
-import mailtrainConfig
-    from 'mailtrainConfig';
-import {
-    ActionLink,
-    Button
-} from "../lib/bootstrap-components";
+import {getSandboxUrl} from "../lib/urls";
+import mailtrainConfig from 'mailtrainConfig';
+import {ActionLink, Button} from "../lib/bootstrap-components";
 import {Trans} from "react-i18next";
+import {TagLanguages, renderTag} from "../../../shared/templates";
 
-import styles
-    from "../lib/styles.scss";
-import {
-    base,
-    unbase
-} from "../../../shared/templates";
+import styles from "../lib/styles.scss";
 
 export const ResourceType = {
     TEMPLATE: 'template',
     CAMPAIGN: 'campaign'
+};
+
+export function getTagLanguages(t) {
+    return {
+        [TagLanguages.SIMPLE]: {
+            name: t('Simple')
+        },
+        [TagLanguages.HBS]: {
+            name: t('Handlebars')
+        }
+    };
 }
 
-export function getTemplateTypes(t, prefix = '', entityTypeId = ResourceType.TEMPLATE) {
+export function getTemplateTypes(t, prefix = '', entityTypeId = ResourceType.TEMPLATE, allowEmpty = false) {
     // The prefix is used to to enable use within other forms (i.e. campaign form)
     const templateTypes = {};
 
@@ -93,23 +79,31 @@ export function getTemplateTypes(t, prefix = '', entityTypeId = ResourceType.TEM
             render: data => mosaicoTemplateTypes[data].typeName
         },
         {
-            data: 5,
+            data: 6,
             title: t('namespace')
         },
     ];
 
     templateTypes.mosaico = {
         typeName: t('mosaico'),
-        getTypeForm: (owner, isEdit) =>
-            <TableSelect
-                id={prefix + 'mosaicoTemplate'}
-                label={t('mosaicoTemplate')}
-                withHeader
-                dropdown
-                dataUrl='rest/mosaico-templates-table'
-                columns={mosaicoTemplatesColumns}
-                selectionLabelIndex={1}
-                disabled={isEdit}/>,
+        getTypeForm: (owner, isEdit) => {
+            const tagLanguageKey = owner.getFormValue(prefix + 'tag_language');
+            if (tagLanguageKey) {
+                return <TableSelect
+                    id={prefix + 'mosaicoTemplate'}
+                    label={t('mosaicoTemplate')}
+                    withHeader
+                    dropdown
+                    dataUrl={`rest/mosaico-templates-by-tag-language-table/${tagLanguageKey}`}
+                    columns={mosaicoTemplatesColumns}
+                    selectionLabelIndex={1}
+                    disabled={isEdit}
+                    withClear={allowEmpty}
+                />
+            } else {
+                return null;
+            }
+        },
         getHTMLEditor: owner =>
             <AlignedRow
                 label={t('templateContentHtml')}>
@@ -129,14 +123,19 @@ export function getTemplateTypes(t, prefix = '', entityTypeId = ResourceType.TEM
                 />
             </AlignedRow>,
         exportHTMLEditorData: async owner => {
-            const {html, metadata, model} = await owner.editorNode.exportState();
-            return {
-                [prefix + 'html']: html,
-                [prefix + 'mosaicoData']: {
-                    metadata,
-                    model
-                }
-            };
+            const state = await owner.editorNode.exportState();
+            // If the sandbox is still loading, the exportState returns null.
+            if (state) {
+                return {
+                    [prefix + 'html']: state.html,
+                    [prefix + 'mosaicoData']: {
+                        metadata: state.metadata,
+                        model: state.model
+                    }
+                };
+            } else {
+                return null;
+            }
         },
         exportContent: async (owner, contentType) => {
             const {html, metadata, model} = await owner.editorNode.exportState();
@@ -144,7 +143,7 @@ export function getTemplateTypes(t, prefix = '', entityTypeId = ResourceType.TEM
             return null;
         },
         initData: () => ({
-            [prefix + 'mosaicoTemplate']: '',
+            [prefix + 'mosaicoTemplate']: null,
             [prefix + 'mosaicoData']: {}
         }),
         afterLoad: data => {
@@ -165,9 +164,14 @@ export function getTemplateTypes(t, prefix = '', entityTypeId = ResourceType.TEM
         afterTypeChange: mutState => {
             initFieldsIfMissing(mutState, 'mosaico');
         },
+        afterTagLanguageChange: (mutState, isEdit) => {
+            if (!isEdit) {
+                mutState.setIn([prefix + 'mosaicoTemplate', 'value'], null);
+            }
+        },
         validate: state => {
             const mosaicoTemplate = state.getIn([prefix + 'mosaicoTemplate', 'value']);
-            if (!mosaicoTemplate) {
+            if (!allowEmpty && !mosaicoTemplate) {
                 state.setIn([prefix + 'mosaicoTemplate', 'error'], t('mosaicoTemplateMustBeSelected'));
             }
         }
@@ -199,7 +203,7 @@ export function getTemplateTypes(t, prefix = '', entityTypeId = ResourceType.TEM
                     entity={owner.props.entity}
                     initialModel={owner.getFormValue(prefix + 'mosaicoData').model}
                     initialMetadata={owner.getFormValue(prefix + 'mosaicoData').metadata}
-                    templatePath={getSandboxUrl(`static/mosaico/templates/${owner.getFormValue(prefix + 'mosaicoFsTemplate')}/index.html`)}
+                    templatePath={getSandboxUrl(`static/mosaico/templates/${owner.getFormValue(prefix + 'mosaicoFsTemplate')}/template-${owner.getFormValue(prefix + 'mosaicoFsTemplate')}.html`)}
                     entityTypeId={entityTypeId}
                     title={t('mosaicoTemplateDesigner')}
                     onSave={::owner.save}
@@ -210,14 +214,19 @@ export function getTemplateTypes(t, prefix = '', entityTypeId = ResourceType.TEM
                 />
             </AlignedRow>,
         exportHTMLEditorData: async owner => {
-            const {html, metadata, model} = await owner.editorNode.exportState();
-            return {
-                [prefix + 'html']: html,
-                [prefix + 'mosaicoData']: {
-                    metadata,
-                    model
-                }
-            };
+            const state = await owner.editorNode.exportState();
+            // If the sandbox is still loading, the exportState returns null.
+            if (state) {
+                return {
+                    [prefix + 'html']: state.html,
+                    [prefix + 'mosaicoData']: {
+                        metadata: state.metadata,
+                        model: state.model
+                    }
+                };
+            } else {
+                return null;
+            }
         },
         exportContent: async (owner, contentType) => {
             const {html, metadata, model} = await owner.editorNode.exportState();
@@ -246,6 +255,8 @@ export function getTemplateTypes(t, prefix = '', entityTypeId = ResourceType.TEM
         afterTypeChange: mutState => {
             initFieldsIfMissing(mutState, 'mosaicoWithFsTemplate');
         },
+        afterTagLanguageChange: (mutState, isEdit) => {
+        },
         validate: state => {
         }
     };
@@ -264,11 +275,11 @@ export function getTemplateTypes(t, prefix = '', entityTypeId = ResourceType.TEM
                 return <StaticField
                     id={prefix + 'grapesJSSourceType'}
                     className={styles.formDisabled}
-                    label={t('Content')}>{grapesJSSourceTypeLabels[owner.getFormValue(prefix + 'grapesJSSourceType')]}</StaticField>;
+                    label={t('content')}>{grapesJSSourceTypeLabels[owner.getFormValue(prefix + 'grapesJSSourceType')]}</StaticField>;
             } else {
                 return <Dropdown
                     id={prefix + 'grapesJSSourceType'}
-                    label={t('Content')}
+                    label={t('content')}
                     options={grapesJSSourceTypes}/>;
             }
         },
@@ -291,14 +302,19 @@ export function getTemplateTypes(t, prefix = '', entityTypeId = ResourceType.TEM
                 />
             </AlignedRow>,
         exportHTMLEditorData: async owner => {
-            const {html, source, style} = await owner.editorNode.exportState();
-            return {
-                [prefix + 'html']: html,
-                [prefix + 'grapesJSData']: {
-                    source,
-                    style
-                }
-            };
+            const state = await owner.editorNode.exportState();
+            // If the sandbox is still loading, the exportState returns null.
+            if (state) {
+                return {
+                    [prefix + 'html']: state.html,
+                    [prefix + 'grapesJSData']: {
+                        source: state.source,
+                        style: state.style
+                    }
+                };
+            } else {
+                return null;
+            }
         },
         exportContent: async (owner, contentType) => {
             const {html, source, style} = await owner.editorNode.exportState();
@@ -328,6 +344,8 @@ export function getTemplateTypes(t, prefix = '', entityTypeId = ResourceType.TEM
         afterTypeChange: mutState => {
             initFieldsIfMissing(mutState, 'grapesjs');
         },
+        afterTagLanguageChange: (mutState, isEdit) => {
+        },
         validate: state => {
         }
     };
@@ -352,13 +370,18 @@ export function getTemplateTypes(t, prefix = '', entityTypeId = ResourceType.TEM
                 />
             </AlignedRow>,
         exportHTMLEditorData: async owner => {
-            const {html, source} = await owner.editorNode.exportState();
-            return {
-                [prefix + 'html']: html,
-                [prefix + 'ckeditor4Data']: {
-                    source
-                }
-            };
+            const state = await owner.editorNode.exportState();
+            // If the sandbox is still loading, the exportState returns null.
+            if (state) {
+                return {
+                    [prefix + 'html']: state.html,
+                    [prefix + 'ckeditor4Data']: {
+                        source: state.source
+                    }
+                };
+            } else {
+                return null;
+            }
         },
         exportContent: async (owner, contentType) => {
             const {html, source} = await owner.editorNode.exportState();
@@ -381,6 +404,8 @@ export function getTemplateTypes(t, prefix = '', entityTypeId = ResourceType.TEM
         },
         afterTypeChange: mutState => {
             initFieldsIfMissing(mutState, 'ckeditor4');
+        },
+        afterTagLanguageChange: (mutState, isEdit) => {
         },
         validate: state => {
         }
@@ -427,13 +452,18 @@ export function getTemplateTypes(t, prefix = '', entityTypeId = ResourceType.TEM
                 />
             </AlignedRow>,
         exportHTMLEditorData: async owner => {
-            const {html, source} = await owner.editorNode.exportState();
-            return {
-                [prefix + 'html']: html,
-                [prefix + 'codeEditorData']: {
-                    source
-                }
-            };
+            const state = await owner.editorNode.exportState();
+            // If the sandbox is still loading, the exportState returns null.
+            if (state) {
+                return {
+                    [prefix + 'html']: state.html,
+                    [prefix + 'codeEditorData']: {
+                        source: state.source
+                    }
+                };
+            } else {
+                return null;
+            }
         },
         exportContent: async (owner, contentType) => {
             const {html, source} = await owner.editorNode.exportState();
@@ -461,6 +491,8 @@ export function getTemplateTypes(t, prefix = '', entityTypeId = ResourceType.TEM
         afterTypeChange: mutState => {
             initFieldsIfMissing(mutState, 'codeeditor');
         },
+        afterTagLanguageChange: (mutState, isEdit) => {
+        },
         validate: state => {
         }
     };
@@ -472,6 +504,39 @@ export function getTemplateTypes(t, prefix = '', entityTypeId = ResourceType.TEM
 export function getEditForm(owner, typeKey, prefix = '') {
     const t = owner.props.t;
 
+    const tagLanguage = owner.getFormValue(prefix + 'tag_language');
+
+    const tg = tag => renderTag(tagLanguage, tag);
+
+    let instructions = null;
+    if (tagLanguage === TagLanguages.SIMPLE) {
+        instructions = (
+            <>
+                <Trans i18nKey="mergeTagsAreTagsThatAreReplacedBefore">
+                    <p>Merge tags are tags that are replaced before sending out the message. The format of the merge tag is the following: <code>{tg('TAG_NAME')}</code> or <code>[TAG_NAME/fallback]</code> where <code>fallback</code> is an optional text value used when <code>TAG_NAME</code> is empty.</p>
+                </Trans>
+                <Trans i18nKey="youCanUseAnyOfTheStandardMergeTagsBelow">
+                    <p>You can use any of the standard merge tags below. In addition to that every custom field has its own merge tag. Check the fields of the list you are going to send to.</p>
+                </Trans>
+            </>
+        );
+    } else if (tagLanguage === TagLanguages.HBS) {
+        instructions = (
+            <>
+                <Trans>
+                    <p>Merge tags are tags that are replaced before sending out the message. The format of the merge tag is the following: <code>{tg('TAG_NAME')}</code>. </p>
+                </Trans>
+                <Trans i18nKey="youCanUseAnyOfTheStandardMergeTagsBelow">
+                    <p>You can use any of the standard merge tags below. In addition to that every custom field has its own merge tag. Check the fields of the list you are going to send to.</p>
+                </Trans>
+                <Trans>
+                    <p>The whole message is interpreted as Handlebars template (see <a href="http://handlebarsjs.com/">http://handlebarsjs.com/</a>). You can use any Handlebars blocks and expressions
+                        in the template. The merge tags form the root context of the Handlebars template.</p>
+                </Trans>
+            </>
+        );
+    }
+
     return (
         <div>
             <AlignedRow>
@@ -481,12 +546,7 @@ export function getEditForm(owner, typeKey, prefix = '') {
                     label={t('mergeTagReference')}/>
                 {owner.state.showMergeTagReference &&
                 <div style={{marginTop: '15px'}}>
-                    <Trans i18nKey="mergeTagsAreTagsThatAreReplacedBefore">
-                        <p>Merge tags are tags that are replaced before sending out the message. The format of the merge tag is the following: <code>[TAG_NAME]</code> or <code>[TAG_NAME/fallback]</code> where <code>fallback</code> is an optional text value used when <code>TAG_NAME</code> is empty.</p>
-                    </Trans>
-                    <Trans i18nKey="youCanUseAnyOfTheStandardMergeTagsBelow">
-                        <p>You can use any of the standard merge tags below. In addition to that every custom field has its own merge tag. Check the fields of the list you are going to send to.</p>
-                    </Trans>
+                    {instructions}
                     <table className="table table-bordered table-condensed table-striped">
                         <thead>
                         <tr>
@@ -501,7 +561,7 @@ export function getEditForm(owner, typeKey, prefix = '') {
                         <tbody>
                         <tr>
                             <th scope="row">
-                                [LINK_UNSUBSCRIBE]
+                                {tg('LINK_UNSUBSCRIBE')}
                             </th>
                             <td>
                                 <Trans i18nKey="urlThatPointsToTheUnsubscribePage">URL that points to the unsubscribe page</Trans>
@@ -509,7 +569,7 @@ export function getEditForm(owner, typeKey, prefix = '') {
                         </tr>
                         <tr>
                             <th scope="row">
-                                [LINK_PREFERENCES]
+                                {tg('LINK_PREFERENCES')}
                             </th>
                             <td>
                                 <Trans i18nKey="urlThatPointsToThePreferencesPageOfThe">URL that points to the preferences page of the subscriber</Trans>
@@ -517,7 +577,7 @@ export function getEditForm(owner, typeKey, prefix = '') {
                         </tr>
                         <tr>
                             <th scope="row">
-                                [LINK_BROWSER]
+                                {tg('LINK_BROWSER')}
                             </th>
                             <td>
                                 <Trans i18nKey="urlToPreviewTheMessageInABrowser">URL to preview the message in a browser</Trans>
@@ -525,7 +585,7 @@ export function getEditForm(owner, typeKey, prefix = '') {
                         </tr>
                         <tr>
                             <th scope="row">
-                                [EMAIL]
+                                {tg('EMAIL')}
                             </th>
                             <td>
                                 <Trans i18nKey="emailAddress-1">Email address</Trans>
@@ -533,7 +593,7 @@ export function getEditForm(owner, typeKey, prefix = '') {
                         </tr>
                         <tr>
                             <th scope="row">
-                                [SUBSCRIPTION_ID]
+                                {tg('SUBSCRIPTION_ID')}
                             </th>
                             <td>
                                 <Trans i18nKey="uniqueIdThatIdentifiesTheRecipient">Unique ID that identifies the recipient</Trans>
@@ -541,7 +601,7 @@ export function getEditForm(owner, typeKey, prefix = '') {
                         </tr>
                         <tr>
                             <th scope="row">
-                                [LIST_ID]
+                                {tg('LIST_ID')}
                             </th>
                             <td>
                                 <Trans i18nKey="uniqueIdThatIdentifiesTheListUsedForThis">Unique ID that identifies the list used for this campaign</Trans>
@@ -549,7 +609,7 @@ export function getEditForm(owner, typeKey, prefix = '') {
                         </tr>
                         <tr>
                             <th scope="row">
-                                [CAMPAIGN_ID]
+                                {tg('CAMPAIGN_ID')}
                             </th>
                             <td>
                                 <Trans i18nKey="uniqueIdThatIdentifiesCurrentCampaign">Unique ID that identifies current campaign</Trans>
@@ -574,7 +634,7 @@ export function getEditForm(owner, typeKey, prefix = '') {
                         <tbody>
                         <tr>
                             <th scope="row">
-                                [RSS_ENTRY_TITLE]
+                                {tg('RSS_ENTRY_TITLE')}
                             </th>
                             <td>
                                 <Trans i18nKey="rssEntryTitle">RSS entry title</Trans>
@@ -582,7 +642,7 @@ export function getEditForm(owner, typeKey, prefix = '') {
                         </tr>
                         <tr>
                             <th scope="row">
-                                [RSS_ENTRY_DATE]
+                                {tg('RSS_ENTRY_DATE')}
                             </th>
                             <td>
                                 <Trans i18nKey="rssEntryDate">RSS entry date</Trans>
@@ -590,7 +650,7 @@ export function getEditForm(owner, typeKey, prefix = '') {
                         </tr>
                         <tr>
                             <th scope="row">
-                                [RSS_ENTRY_LINK]
+                                {tg('RSS_ENTRY_LINK')}
                             </th>
                             <td>
                                 <Trans i18nKey="rssEntryLink">RSS entry link</Trans>
@@ -598,7 +658,7 @@ export function getEditForm(owner, typeKey, prefix = '') {
                         </tr>
                         <tr>
                             <th scope="row">
-                                [RSS_ENTRY_CONTENT]
+                                {tg('RSS_ENTRY_CONTENT')}
                             </th>
                             <td>
                                 <Trans i18nKey="contentOfAnRssEntry">Content of an RSS entry</Trans>
@@ -606,7 +666,7 @@ export function getEditForm(owner, typeKey, prefix = '') {
                         </tr>
                         <tr>
                             <th scope="row">
-                                [RSS_ENTRY_SUMMARY]
+                                {tg('RSS_ENTRY_SUMMARY')}
                             </th>
                             <td>
                                 <Trans i18nKey="rssEntrySummary">RSS entry summary</Trans>
@@ -614,10 +674,18 @@ export function getEditForm(owner, typeKey, prefix = '') {
                         </tr>
                         <tr>
                             <th scope="row">
-                                [RSS_ENTRY_IMAGE_URL]
+                                {tg('RSS_ENTRY_IMAGE_URL')}
                             </th>
                             <td>
                                 <Trans i18nKey="rssEntryImageUrl">RSS entry image URL</Trans>
+                            </td>
+                        </tr>
+                        <tr>
+                            <th scope="row">
+                                {tg('RSS_ENTRY_CUSTOM_TAGS')}
+                            </th>
+                            <td>
+                                <Trans>Mailtrain custom tags. The custom tags can be passed in via <code>mt:entries-json</code> element in RSS entry. The text contents of the elements is interpreted as JSON-formatted object..</Trans>
                             </td>
                         </tr>
                         </tbody>

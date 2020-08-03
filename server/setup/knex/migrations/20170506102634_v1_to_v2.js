@@ -2,15 +2,17 @@ const { CampaignSource, CampaignType} = require('../../../../shared/campaigns');
 const files = require('../../../models/files');
 const contextHelpers = require('../../../lib/context-helpers');
 const mosaicoTemplates = require('../../../../shared/mosaico-templates');
+const {TagLanguages} = require('../../../../shared/templates');
 const {getGlobalNamespaceId} = require('../../../../shared/namespaces');
 const {getAdminId} = require('../../../../shared/users');
 const { MailerType, ZoneMTAType, getSystemSendConfigurationId, getSystemSendConfigurationCid } = require('../../../../shared/send-configurations');
-const { enforce } = require('../../../lib/helpers');
+const { enforce, hashEmail} = require('../../../lib/helpers');
 const { EntityVals: TriggerEntityVals, EventVals: TriggerEventVals } = require('../../../../shared/triggers');
 const { SubscriptionSource } = require('../../../../shared/lists');
-const crypto = require('crypto');
 const {DOMParser, XMLSerializer} = require('xmldom');
 const log = require('../../../lib/log');
+const shortid = require('shortid');
+const slugify = require('slugify');
 
 const entityTypesAddNamespace = ['list', 'custom_form', 'template', 'campaign', 'report', 'report_template', 'user'];
 const shareableEntityTypes = ['list', 'custom_form', 'template', 'campaign', 'report', 'report_template', 'namespace', 'send_configuration', 'mosaico_template'];
@@ -78,7 +80,7 @@ async function migrateBase(knex) {
     // The original Mailtrain migration is executed before this one. So here we check whether the original migration
     // ended where it should have and we take it from there.
     const row = await knex('settings').where({key: 'db_schema_version'}).first('value');
-    if (!row || Number(row.value) !== 33) {
+    if (!row || Number(row.value) !== 34) {
         throw new Error('Unsupported DB schema version: ' + row.value);
     }
 
@@ -236,15 +238,53 @@ async function migrateUsers(knex) {
     });
 }
 
+async function shortenFieldColumnNames(knex, list) {
+    const fields = await knex('custom_fields').whereNotNull('column').where('list', list.id);
+
+    const fieldsMap = new Map();
+
+    for (const field of fields) {
+        const oldName = field.column;
+        const newName = ('custom_' + slugify(field.name, '_').substring(0,32) + '_' + shortid.generate()).toLowerCase().replace(/[^a-z0-9_]/g, '_');
+
+        fieldsMap.set(oldName, newName);
+
+        await knex('custom_fields').where('id', field.id).update('column', newName);
+
+        await knex.schema.table('subscription__' + list.id, table => {
+            table.renameColumn(oldName, newName);
+        });
+    }
+
+
+    function processRule(rule) {
+        if (rule.type === 'all' || rule.type === 'some' || rule.type === 'none') {
+            for (const childRule of rule.rules) {
+                processRule(childRule);
+            }
+        } else {
+            rule.column = fieldsMap.get(rule.column) || rule.column /* this is to handle "email" column */;
+        }
+    }
+
+    const segments = await knex('segments').where('list', list.id);
+    for (const segment of segments) {
+        const settings = JSON.parse(segment.settings);
+        processRule(settings.rootRule);
+        await knex('segments').where('id', segment.id).update({settings: JSON.stringify(settings)});
+    }
+}
+
 async function migrateSubscriptions(knex) {
     await knex.schema.dropTableIfExists('subscription');
 
     const lists = await knex('lists');
     for (const list of lists) {
+        await shortenFieldColumnNames(knex, list);
+
         await knex.schema.raw('ALTER TABLE `subscription__' + list.id + '` ADD `unsubscribed` timestamp NULL DEFAULT NULL');
         await knex.schema.raw('ALTER TABLE `subscription__' + list.id + '` ADD `source_email` int(11) DEFAULT NULL');
         await knex.schema.raw('ALTER TABLE `subscription__' + list.id + '` ADD `hash_email` varchar(255) CHARACTER SET ascii');
-
 
         const fields = await knex('custom_fields').where('list', list.id);
         const info = await knex('subscription__' + list.id).columnInfo();
@@ -270,7 +310,7 @@ async function migrateSubscriptions(knex) {
 
             if (rows.length > 0) {
                 for await (const subscription of rows) {
-                    subscription.hash_email = crypto.createHash('sha512').update(subscription.email).digest("base64");
+                    subscription.hash_email = hashEmail(subscription.email);
                     subscription.source_email = subscription.imported ? SubscriptionSource.IMPORTED_V1 : SubscriptionSource.NOT_IMPORTED_V1;
                     for (const field of fields) {
                         if (field.column != null) {
@@ -416,6 +456,7 @@ async function migrateCustomFields(knex) {
     });
 
     await knex.schema.table('custom_fields', table => {
+        table.renameColumn('description', 'help');
         table.dropColumn('visible');
     });
 
@@ -753,11 +794,11 @@ async function migrateSettings(knex) {
 
         if (settings.dkimApiKey) {
             mailer_type = MailerType.ZONE_MTA;
-            mailer_settings.dkimApiKey = settings.dkimApiKey;
+            mailer_settings.dkimApiKey = settings.dkimApiKey || '';
             mailer_settings.zoneMtaType = ZoneMTAType.WITH_HTTP_CONF;
-            mailer_settings.dkimDomain = settings.dkimDomain;
-            mailer_settings.dkimSelector = settings.dkimSelector;
-            mailer_settings.dkimPrivateKey = settings.dkimPrivateKey;
+            mailer_settings.dkimDomain = settings.dkimDomain || '';
+            mailer_settings.dkimSelector = settings.dkimSelector || '';
+            mailer_settings.dkimPrivateKey = settings.dkimPrivateKey || '';
         }
     }
 
@@ -777,7 +818,7 @@ async function migrateSettings(knex) {
         verp_hostname: settings.verpUse ? settings.verpHostname : null,
         mailer_type,
         mailer_settings: JSON.stringify(mailer_settings),
-        x_mailer: settings.x_mailer,
+        x_mailer: settings.x_mailer || '',
         namespace: getGlobalNamespaceId()
     });
 
@@ -810,7 +851,7 @@ async function addFiles(knex) {
                 table.string('mimetype');
                 table.integer('size');
                 table.timestamp('created').defaultTo(knex.fn.now());
-                table.index(['entity', 'originalname'])
+                table.index(['entity', 'originalname']);
             });
         }
     }
@@ -905,7 +946,7 @@ async function addMosaicoTemplates(knex) {
         type: 'html',
         namespace: 1,
         data: JSON.stringify({
-            html: mosaicoTemplates.getVersafix()
+            html: mosaicoTemplates.getVersafix(TagLanguages.SIMPLE)
         })
     };
 
@@ -1250,10 +1291,11 @@ exports.up = (knex, Promise) => (async() => {
     await migrateCustomFields(knex);
     log.verbose('Migration', 'Custom fields complete')
 
-    await migrateSubscriptions(knex);
-
     await migrateSegments(knex);
     log.verbose('Migration', 'Segments complete')
+
+    await migrateSubscriptions(knex);
+    log.verbose('Migration', 'Subscriptions complete')
 
     await migrateReports(knex);
     log.verbose('Migration', 'Reports complete')

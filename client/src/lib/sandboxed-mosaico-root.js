@@ -4,14 +4,14 @@ import './public-path';
 
 import React, {Component} from 'react';
 import ReactDOM from 'react-dom';
-import {I18nextProvider} from 'react-i18next';
-import i18n, {withTranslation} from './i18n';
+import {TranslationRoot, withTranslation} from './i18n';
 import {parentRPC, UntrustedContentRoot} from './untrusted';
 import PropTypes from "prop-types";
 import {getPublicUrl, getSandboxUrl, getTrustedUrl} from "./urls";
 import {base, unbase} from "../../../shared/templates";
 import {withComponentMixins} from "./decorator-helpers";
 import juice from "juice";
+
 
 @withComponentMixins([
     withTranslation
@@ -27,6 +27,7 @@ class MosaicoSandbox extends Component {
     static propTypes = {
         entityTypeId: PropTypes.string,
         entityId: PropTypes.number,
+        tagLanguage: PropTypes.string,
         templateId: PropTypes.number,
         templatePath: PropTypes.string,
         initialModel: PropTypes.string,
@@ -56,12 +57,13 @@ class MosaicoSandbox extends Component {
                 ...
             </div>
          */
-        const html = juice(this.viewModel.exportHTML());
+        let html = this.viewModel.export();
+        html = juice(html);
 
         return {
-            html: unbase(html, trustedUrlBase, sandboxUrlBase, publicUrlBase, true),
-            model: unbase(this.viewModel.exportJSON(), trustedUrlBase, sandboxUrlBase, publicUrlBase),
-            metadata: unbase(this.viewModel.exportMetadata(), trustedUrlBase, sandboxUrlBase, publicUrlBase)
+            html: unbase(html, this.props.tagLanguage, trustedUrlBase, sandboxUrlBase, publicUrlBase, true),
+            model: unbase(this.viewModel.exportJSON(), this.props.tagLanguage, trustedUrlBase, sandboxUrlBase, publicUrlBase),
+            metadata: unbase(this.viewModel.exportMetadata(), this.props.tagLanguage, trustedUrlBase, sandboxUrlBase, publicUrlBase)
         };
     }
 
@@ -84,6 +86,18 @@ class MosaicoSandbox extends Component {
             viewModel.originalExportHTML = viewModel.exportHTML;
             viewModel.exportHTML = () => {
                 let html = viewModel.originalExportHTML();
+
+                // Chrome workaround begin -----------------------------------------------------------------------------------
+                // Chrome v. 74 (and likely other versions too) has problem with how KO sets data during export.
+                // As the result, the images that have been in the template from previous editing (i.e. before page refresh)
+                // get lost. The code below refreshes the KO binding, thus effectively reloading the images.
+                const isChrome = !!window.chrome && (!!window.chrome.webstore || !!window.chrome.runtime);
+                if (isChrome) {
+                    ko.cleanNode(document.body);
+                    ko.applyBindings(viewModel, document.body);
+                }
+                // Chrome workaround end -------------------------------------------------------------------------------------
+
                 for (const portRender of window.mosaicoHTMLPostRenderers) {
                     html = postRender(html);
                 }
@@ -99,7 +113,7 @@ class MosaicoSandbox extends Component {
 
         plugins.unshift(vm => {
             // This is an override of the default paths in Mosaico
-            vm.logoPath = getTrustedUrl('static/mosaico/img/mosaico32.png');
+            vm.logoPath = getTrustedUrl('static/mosaico/rs/img/mosaico32.png');
             vm.logoUrl = '#';
         });
 
@@ -115,8 +129,8 @@ class MosaicoSandbox extends Component {
         const trustedUrlBase = getTrustedUrl();
         const sandboxUrlBase = getSandboxUrl();
         const publicUrlBase = getPublicUrl();
-        const metadata = this.props.initialMetadata && JSON.parse(base(this.props.initialMetadata, trustedUrlBase, sandboxUrlBase, publicUrlBase));
-        const model = this.props.initialModel && JSON.parse(base(this.props.initialModel, trustedUrlBase, sandboxUrlBase, publicUrlBase));
+        const metadata = this.props.initialMetadata && JSON.parse(base(this.props.initialMetadata, this.props.tagLanguage, trustedUrlBase, sandboxUrlBase, publicUrlBase));
+        const model = this.props.initialModel && JSON.parse(base(this.props.initialModel, this.props.tagLanguage, trustedUrlBase, sandboxUrlBase, publicUrlBase));
         const template = this.props.templateId ? getSandboxUrl(`mosaico/templates/${this.props.templateId}/index.html`) : this.props.templatePath;
 
         const allPlugins = plugins.concat(window.mosaicoPlugins);
@@ -135,9 +149,9 @@ export default function() {
     parentRPC.init();
 
     ReactDOM.render(
-        <I18nextProvider i18n={ i18n }>
+        <TranslationRoot>
             <UntrustedContentRoot render={props => <MosaicoSandbox {...props} />} />
-        </I18nextProvider>,
+        </TranslationRoot>,
         document.getElementById('root')
     );
 };

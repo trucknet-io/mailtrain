@@ -1,6 +1,6 @@
 'use strict';
 
-const config = require('config');
+const config = require('./lib/config');
 const log = require('./lib/log');
 
 const express = require('express');
@@ -23,6 +23,7 @@ const api = require('./routes/api');
 const reports = require('./routes/reports');
 const quickReports = require('./routes/quick-reports');
 const subscriptions = require('./routes/subscriptions');
+const campaigns = require('./routes/campaigns');
 const subscription = require('./routes/subscription');
 const sandboxedMosaico = require('./routes/sandboxed-mosaico');
 const sandboxedCKEditor = require('./routes/sandboxed-ckeditor');
@@ -39,6 +40,7 @@ const usersRest = require('./routes/rest/users');
 const accountRest = require('./routes/rest/account');
 const reportTemplatesRest = require('./routes/rest/report-templates');
 const reportsRest = require('./routes/rest/reports');
+const channelsRest = require('./routes/rest/channels');
 const campaignsRest = require('./routes/rest/campaigns');
 const triggersRest = require('./routes/rest/triggers');
 const listsRest = require('./routes/rest/lists');
@@ -60,8 +62,8 @@ const index = require('./routes/index');
 
 const interoperableErrors = require('../shared/interoperable-errors');
 
-const { getTrustedUrl } = require('./lib/urls');
 const hbsHelpers = require("./lib/hbs-helpers");
+const { getTrustedUrl, getSandboxUrl, getPublicUrl } = require('./lib/urls');
 const { AppType } = require('../shared/app');
 
 
@@ -239,11 +241,11 @@ async function createApp(appType) {
     useWith404Fallback('/static', express.static(path.join(__dirname, '..', 'client', 'static')));
     useWith404Fallback('/client', express.static(path.join(__dirname, '..', 'client', 'dist')));
 
-    useWith404Fallback('/static-npm/fontawesome', express.static(path.join(__dirname, '..', 'client', 'node_modules', '@fortawesome', 'fontawesome-free', 'webfonts')));
-    useWith404Fallback('/static-npm/jquery.min.js', express.static(path.join(__dirname, '..', 'client', 'node_modules', 'jquery', 'dist', 'jquery.min.js')));
-    useWith404Fallback('/static-npm/popper.min.js', express.static(path.join(__dirname, '..', 'client', 'node_modules', 'popper.js', 'dist', 'umd', 'popper.min.js')));
-    useWith404Fallback('/static-npm/bootstrap.min.js', express.static(path.join(__dirname, '..', 'client', 'node_modules', 'bootstrap', 'dist', 'js', 'bootstrap.min.js')));
-    useWith404Fallback('/static-npm/coreui.min.js', express.static(path.join(__dirname, '..', 'client', 'node_modules', '@coreui', 'coreui', 'dist', 'js', 'coreui.min.js')));
+    useWith404Fallback('/static-npm/fontawesome', express.static(path.join(__dirname, '..', 'client', 'dist', 'webfonts')));
+    useWith404Fallback('/static-npm/jquery.min.js', express.static(path.join(__dirname, '..', 'client', 'dist', 'jquery.min.js')));
+    useWith404Fallback('/static-npm/popper.min.js', express.static(path.join(__dirname, '..', 'client', 'dist', 'popper.min.js')));
+    useWith404Fallback('/static-npm/bootstrap.min.js', express.static(path.join(__dirname, '..', 'client', 'dist', 'bootstrap.min.js')));
+    useWith404Fallback('/static-npm/coreui.min.js', express.static(path.join(__dirname, '..', 'client', 'dist', 'coreui.min.js')));
 
 
     // Make sure flash messages are available
@@ -277,6 +279,8 @@ async function createApp(appType) {
         useWith404Fallback('/files', files);
     }
 
+    useWith404Fallback('/cpgs', await campaigns.getRouter(appType)); // This needs to be different from "campaigns", which is already used by the UI
+
     useWith404Fallback('/mosaico', await sandboxedMosaico.getRouter(appType));
     useWith404Fallback('/ckeditor', await sandboxedCKEditor.getRouter(appType));
     useWith404Fallback('/grapesjs', await sandboxedGrapesJS.getRouter(appType));
@@ -300,6 +304,7 @@ async function createApp(appType) {
         app.use('/rest', sendConfigurationsRest);
         app.use('/rest', usersRest);
         app.use('/rest', accountRest);
+        app.use('/rest', channelsRest);
         app.use('/rest', campaignsRest);
         app.use('/rest', triggersRest);
         app.use('/rest', listsRest);
@@ -360,11 +365,21 @@ async function createApp(appType) {
             if (err instanceof interoperableErrors.NotLoggedInError) {
                 return res.redirect(getTrustedUrl('/login?next=' + encodeURIComponent(req.originalUrl)));
             } else {
+                let publicPath;
+                if (appType === AppType.TRUSTED) {
+                    publicPath = getTrustedUrl();
+                } else if (appType === AppType.SANDBOXED) {
+                    publicPath = getSandboxUrl();
+                } else if (appType === AppType.PUBLIC) {
+                    publicPath = getPublicUrl();
+                }
+
                 log.verbose('HTTP', err);
                 res.status(err.status || 500);
                 res.render('error', {
                     message: err.message,
-                    error: config.sendStacktracesToClient ? err : {}
+                    error: config.sendStacktracesToClient ? err : {},
+                    publicPath
                 });
             }
         }
