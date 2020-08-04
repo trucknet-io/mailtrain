@@ -9,6 +9,7 @@ const hasher = require('node-object-hash')();
 const mjml2html = require('mjml');
 
 const hbs = require('hbs');
+const hbsHelpers = require("./hbs-helpers");
 const juice = require('juice');
 const he = require('he');
 const htmlToText = require('html-to-text');
@@ -20,6 +21,8 @@ const { tUI, tLog, getLangCodeFromExpressLocale } = require('./translate');
 
 const {TagLanguages} = require('../../shared/templates');
 
+hbsHelpers.registerSwitchCase();
+hbsHelpers.registerIfConditions();
 
 const templates = new Map();
 
