@@ -86,5 +86,15 @@ module.exports = {
                 return args.some(Boolean);
             }
         });
+    },
+    /**
+     * https://stackoverflow.com/questions/42245693/handlebars-js-replacing-portion-of-string
+     * {{#replace "&amp;" "and"}}{{title}}{{/replace}}
+     */
+    registerReplace: () => {
+        hbs.registerHelper('replace', function( find, replace, options) {
+            var string = options.fn(this);
+            return string.replace( find, replace );
+        });
     }
 };
