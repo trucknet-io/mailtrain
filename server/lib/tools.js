@@ -24,6 +24,7 @@ const {TagLanguages} = require('../../shared/templates');
 hbsHelpers.registerSwitchCase();
 hbsHelpers.registerIfConditions();
 hbsHelpers.registerReplace();
+hbsHelpers.registerJson();
 
 const templates = new Map();
 

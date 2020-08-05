@@ -96,5 +96,13 @@ module.exports = {
             var string = options.fn(this);
             return string.replace( find, replace );
         });
+    },
+    /**
+     * {{{json addressBook}}}
+     */
+    registerJson: () => {
+        Handlebars.registerHelper('json', function(context) {
+            return JSON.stringify(context);
+        });
     }
 };
