@@ -101,7 +101,7 @@ module.exports = {
      * {{{json addressBook}}}
      */
     registerJson: () => {
-        Handlebars.registerHelper('json', function(context) {
+        hbs.registerHelper('json', function(context) {
             return JSON.stringify(context);
         });
     }
